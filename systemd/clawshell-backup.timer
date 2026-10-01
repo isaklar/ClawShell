@@ -1,0 +1,13 @@
+[Unit]
+Description=Run clawshell backup daily
+
+[Timer]
+# Randomized within a 30-minute window to avoid every host on someone's LAN
+# hitting disk I/O at exactly the same wall-clock second; harmless jitter.
+OnCalendar=*-*-* 03:00:00
+RandomizedDelaySec=30min
+Persistent=true
+Unit=clawshell-backup.service
+
+[Install]
+WantedBy=timers.target

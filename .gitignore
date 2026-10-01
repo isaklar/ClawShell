@@ -1,0 +1,29 @@
+# Secrets & local state — never commit
+.env
+secrets/
+state/
+workspaces/
+logs/
+backups/
+# Engagement inputs (target code under test + optional requirement spec). These
+# are mounted read-only into the agents; never commit a target or a client spec.
+engagement/
+config/allowlist.d/*
+!config/allowlist.d/README.md
+!config/allowlist.d/.gitkeep
+config/openclaw.json5
+*.pem
+*.key
+*.crt
+mitmproxy-ca*
+
+# Runtime / build artifacts
+node_modules/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp

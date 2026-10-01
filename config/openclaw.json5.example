@@ -1,0 +1,218 @@
+// OpenClaw configuration mounted read-only into the Gateway container at
+// /home/node/.openclaw/openclaw.json5. Copy to config/openclaw.json5 (git-
+// ignored — it may reflect host-specific choices) and adjust before first
+// start. See docs/credentials.md for the MODEL_PROVIDER decision and
+// docs/pentest-team.md for the agent roster.
+//
+// ClawShell is a sandboxed, GPU-first PENTEST platform: the agents read a
+// pentesting requirement spec, analyze the code shipped alongside it, and
+// report findings — all boxed in by the same deny-by-default network/host
+// containment as the upstream infra it was derived from.
+{
+  gateway: {
+    bind: "lan", // published port is still restricted by nftables to LAN_ALLOW_CIDR
+    port: 18789,
+    auth: {
+      mode: "token",
+      // Token is supplied via OPENCLAW_GATEWAY_TOKEN_FILE at runtime; leave
+      // this unset here so the file-based secret takes precedence.
+    },
+  },
+
+  // Reduce blast radius for tool execution: sandbox ALL sessions, for every
+  // configured agent. Session-scoped so each engagement's sandbox container
+  // is isolated from others. This matters EXTRA here — the `exploit` agent
+  // runs attacker-controlled / proof-of-concept code against the target under
+  // test; every byte of that runs inside the network-isolated sandbox, never
+  // on the host or your LAN (see docs/architecture.md, docs/security.md).
+  //
+  // IMPORTANT: mode is "all", not OpenClaw's own default of "non-main".
+  // Per docs.openclaw.ai/gateway/sandboxing/modes-scope-and-backend,
+  // "non-main" exempts EVERY agent's own main session
+  // (session key `agent:<agentId>:main`), not just a single global "main"
+  // agent — so with the 4-agent team below, "non-main" would leave each
+  // agent's primary session (which is exactly what `scripts/pentest-task.sh`
+  // and `openclaw agent exec --agent <id>` drive) running UNSANDBOXED. That
+  // contradicts this project's deny-by-default threat model, so every session
+  // is sandboxed here with no exception, including main's.
+  agents: {
+    // Required once you define more than one entry under agents.entries —
+    // an explicit multi-agent fleet has no implicit default agent.
+    ownership: "explicit",
+    defaults: {
+      // Ambient/system operations (heartbeat, the internal system agent)
+      // are owned by main — see docs/pentest-team.md.
+      heartbeat: { agentId: "main" },
+      systemAgent: { agentId: "main" },
+      sandbox: {
+        mode: "all",
+        scope: "session",
+        backend: "docker",
+        workspaceAccess: "rw", // scoped to that session's workspace subdir only
+      },
+      // Explicit tool policy: "coding" gives fs/runtime/sessions/memory tools
+      // (see docs.openclaw.ai/gateway/config-tools/tool-policy), then
+      // group:web (web_search, web_fetch, x_search) is denied on top.
+      // Without this, every agent can see and call web_search/web_fetch by
+      // default — this project deliberately gives OpenClaw NO general
+      // internet access from the analysis agents. The code under test and the
+      // spec are all on-box; the egress allowlist would block the underlying
+      // HTTP call anyway, but denying the tool itself avoids agents burning
+      // AI requests/iterations on calls guaranteed to fail.
+      tools: {
+        profile: "coding",
+        deny: ["group:web"],
+      },
+      // Same-agent ephemeral sub-agents (e.g. recon fanning out to map two
+      // modules in parallel) work via sessions_spawn with no agentId — that's
+      // governed by tools.profile above, NOT by subagents.allowAgents (which
+      // only gates spawning AS another configured agent).
+      subagents: {
+        // Hard cap on simultaneous children per run, for EVERY agent (main's
+        // cross-agent delegation to recon/exploit/reporter counts against
+        // this too). Prevents a fan-out from multiplying AI-request/GPU burn
+        // — tune alongside MAX_AI_REQUESTS_PER_TASK in .env.
+        maxConcurrent: 3,
+        // Uncomment and set to a cheaper/faster model id so ephemeral helper
+        // sessions don't run on the same model as the agent that spawned
+        // them. Omit to inherit the caller's model (default).
+        // model: "local/clawshell-local",
+      },
+    },
+    // Default 4-agent PENTEST team: main is the lead pentester and single
+    // point of contact; it plans the engagement from the requirement spec and
+    // delegates bounded work to recon, exploit, and reporter, each an
+    // isolated agent (own workspace, own session store, own sandbox
+    // containers). See docs/pentest-team.md for the full workflow. Role
+    // instructions live in config/agent-workspaces/<role>/AGENTS.md and are
+    // seeded into each agent's workspace by scripts/setup-team.sh.
+    entries: {
+      main: {
+        workspace: "/home/node/workspace",
+        identity: { name: "Lead Pentester" },
+        // Allowed to delegate to the three specialists below via the
+        // sessions_spawn tool; "prefer" is prompt guidance encouraging
+        // delegation, not a hard scheduler (see docs/pentest-team.md).
+        subagents: { allowAgents: ["recon", "exploit", "reporter"], delegationMode: "prefer" },
+        // By default the lead gets web_search (find CVEs, advisories, CWE
+        // references) but NOT web_fetch: arbitrary-URL fetching is denied so
+        // the platform stays strict deny-by-default on egress (no agent can
+        // reach an arbitrary host). To let main read the full advisory/vendor
+        // page it found, uncomment ANY_HTTPS in config/allowlist.conf AND
+        // remove "web_fetch" from this deny list (both are required; see the
+        // ANY_HTTPS note in docs/networking.md). x_search stays denied (no
+        // provider configured).
+        tools: {
+          profile: "coding",
+          deny: ["web_fetch", "x_search"],
+        },
+      },
+      recon: {
+        workspace: "/home/node/workspace/recon",
+        identity: { name: "Recon" },
+        // Uncomment to pin a different model for this role than the global
+        // default:
+        // model: "local/clawshell-local",
+        subagents: { allowAgents: [] }, // specialists do not delegate further
+        // web_search only (snippets for CVE/technology lookups) — NOT
+        // web_fetch. Only main (the lead) gets arbitrary-URL fetching.
+        tools: {
+          profile: "coding",
+          deny: ["web_fetch", "x_search"],
+        },
+      },
+      exploit: {
+        workspace: "/home/node/workspace/exploit",
+        identity: { name: "Exploit" },
+        // No web tools at all (inherits agents.defaults group:web deny) — this
+        // agent reasons about and proof-of-concepts vulnerabilities strictly
+        // against the on-box target inside the sandbox.
+        subagents: { allowAgents: [] },
+      },
+      reporter: {
+        workspace: "/home/node/workspace/reporter",
+        identity: { name: "Reporter" },
+        // No web tools — writes findings mapped to the requirement spec from
+        // the evidence recon/exploit produced.
+        subagents: { allowAgents: [] },
+      },
+    },
+  },
+
+  // Model providers.
+  //
+  // Default MODEL_PROVIDER=local-gpu: inference runs ON THIS BOX on the NVIDIA
+  // GPU (RTX 6000 Ada). The local-llm service (compose/compose.yml) serves an
+  // OpenAI-compatible API; the `local` provider below points at it via the
+  // Gateway's LOCAL_LLM_BASE_URL env var. No API key leaves the box. After
+  // install, select it with:
+  //   docker compose -f compose/compose.yml exec openclaw-gateway \
+  //     openclaw models set local/clawshell-local
+  //
+  // MODEL_PROVIDER=custom works the same way for any OTHER OpenAI-compatible
+  // endpoint (remote or another local server) via MODEL_PROVIDER_BASE_URL.
+  // MODEL_PROVIDER=github-copilot/anthropic/openai use OpenClaw's built-in
+  // providers and need no entry here — see docs/credentials.md.
+  //
+  // AMD / ROCm (LOCAL_LLM_BACKEND=amd-rocm): inference is served by the
+  // local-llm-amd Ollama container instead. OpenClaw's NATIVE `ollama`
+  // provider (below) talks to Ollama's /api/chat — do NOT point it at the
+  // OpenAI-compatible /v1 path, which breaks tool calling. Select it with:
+  //   docker compose -f compose/compose.yml exec openclaw-gateway \
+  //     openclaw models set ollama/qwen2.5-coder:14b
+  // See docs/gpu.md for VRAM-appropriate model tags (24 GB cards etc.).
+  models: {
+    providers: {
+      // On-box GPU inference (default, NVIDIA/vLLM). vLLM ignores the API key
+      // but OpenClaw wants one present; any non-empty string works.
+      local: {
+        baseUrl: "$OPENCLAW_ENV_LOCAL_LLM_BASE_URL",
+        apiKey: "clawshell-local",
+      },
+      // On-box GPU inference, AMD/ROCm variant (LOCAL_LLM_BACKEND=amd-rocm).
+      // Native Ollama API — baseUrl has NO /v1 suffix (deliberate: the /v1
+      // OpenAI shim breaks tool calling). Fixed internal compose hostname.
+      // Harmless to leave defined when running the NVIDIA backend; it's only
+      // used if you select an `ollama/<tag>` model.
+      ollama: {
+        baseUrl: "http://local-llm-amd:11434",
+      },
+      custom: {
+        baseUrl: "$OPENCLAW_ENV_MODEL_PROVIDER_BASE_URL",
+        apiKey: "$OPENCLAW_ENV_MODEL_PROVIDER_API_KEY",
+      },
+    },
+  },
+
+  // Key-free web search for main/recon (see agents.entries above).
+  // DuckDuckGo needs no API key/account. tester/reporter never see this tool
+  // at all (agents.defaults.tools denies group:web for them).
+  tools: {
+    web: {
+      search: { provider: "duckduckgo" },
+    },
+    // Complements quota-guard's network-level circuit breaker with an
+    // in-process guard against an agent repeating the same tool call/result
+    // pattern without making progress. Off by default in OpenClaw; enabling
+    // adds another independent layer against runaway iteration loops burning
+    // through MAX_ITERATIONS_PER_TASK / MAX_AI_REQUESTS_PER_TASK.
+    loopDetection: { enabled: true },
+  },
+
+  // Provides the web_search tool's DuckDuckGo backend. Installed once by
+  // scripts/setup-team.sh (idempotent); needs registry.npmjs.org reachable
+  // for that one install, see config/allowlist.conf.
+  plugins: {
+    entries: {
+      duckduckgo: {},
+    },
+  },
+
+  discovery: {
+    mdns: { mode: "off" }, // no LAN broadcast — see docs/networking.md
+  },
+
+  update: {
+    checkOnStart: false, // this box is offline-first except the allowlisted hosts
+  },
+}

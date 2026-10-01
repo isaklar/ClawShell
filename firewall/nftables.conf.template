@@ -1,0 +1,71 @@
+#!/usr/sbin/nft -f
+# clawshell nftables ruleset template.
+#
+# This file is a TEMPLATE. install.sh renders it (envsubst-style) into
+# /etc/nftables.conf using SSH_PORT, SSH_ALLOW_CIDR, LAN_ALLOW_CIDR, and
+# OPENCLAW_GATEWAY_PORT from your .env, prints a diff, asks for confirmation,
+# and only then loads it — with an automatic revert if it would drop the SSH
+# session running the installer. Do not `nft -f` this file directly with the
+# placeholder tokens still in it.
+#
+# See docs/networking.md for the reasoning, and the DOCKER-USER chain note:
+# Docker rewrites nat/filter rules for published container ports in ways that
+# bypass a naive `inet filter input` chain. We therefore ALSO install rules in
+# the `ip filter DOCKER-USER` chain (evaluated before Docker's own accept
+# rules) so container port publishing can't silently reopen access beyond
+# what's declared in compose/compose.yml.
+
+flush ruleset
+
+table inet filter {
+    chain input {
+        type filter hook input priority 0; policy drop;
+
+        iifname "lo" accept
+        ct state established,related accept
+        ct state invalid drop
+
+        icmp type { echo-request, destination-unreachable, time-exceeded } limit rate 10/second accept
+        icmpv6 type { echo-request, nd-neighbor-solicit, nd-neighbor-advert, nd-router-advert } limit rate 10/second accept
+
+        # SSH — key-only auth is the real control; this just rate-limits and
+        # scopes the source CIDR per .env: SSH_ALLOW_CIDR.
+        ip saddr __SSH_ALLOW_CIDR__ tcp dport __SSH_PORT__ ct state new limit rate 15/minute accept
+
+        # OpenClaw Control UI / Gateway API — LAN only, per .env: LAN_ALLOW_CIDR.
+        ip saddr __LAN_ALLOW_CIDR__ tcp dport __OPENCLAW_GATEWAY_PORT__ accept
+
+        # Everything else inbound: drop (policy default), but log first for
+        # visibility while you tune the ruleset (comment out in production if
+        # too noisy).
+        log prefix "nft-input-drop: " limit rate 5/minute
+    }
+
+    chain forward {
+        type filter hook forward priority 0; policy drop;
+        ct state established,related accept
+        # Docker manages its own forwarding rules for container networks;
+        # DOCKER-USER (below) is the enforcement point for what Docker is
+        # allowed to forward for published ports.
+    }
+
+    chain output {
+        type filter hook output priority 0; policy accept;
+        # Host itself is trusted; container egress is constrained by Docker
+        # network topology + quota-guard, not host-level output rules.
+    }
+}
+
+# DOCKER-USER equivalent: evaluated before Docker's own iptables-nft-managed
+# accept rules for published container ports. Without this, a `ports:` entry
+# in compose.yml could be reachable from more than LAN_ALLOW_CIDR despite the
+# `input` chain above, because Docker's DNAT happens in a different table.
+table ip filter {
+    chain DOCKER-USER {
+        type filter hook forward priority -190;
+        ct state established,related accept
+        ip saddr 127.0.0.0/8 accept
+        ip saddr __LAN_ALLOW_CIDR__ accept
+        ct state new counter drop
+    }
+}

@@ -1,0 +1,9 @@
+[Unit]
+Description=clawshell scheduled backup (state/config/workspaces to /opt/clawshell/backups)
+
+[Service]
+Type=oneshot
+WorkingDirectory=__REPO_ROOT__
+ExecStart=__REPO_ROOT__/scripts/backup.sh
+StandardOutput=journal
+StandardError=journal

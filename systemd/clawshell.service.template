@@ -1,0 +1,16 @@
+[Unit]
+Description=clawshell (OpenClaw sandboxed agent stack)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=__REPO_ROOT__
+ExecStart=/usr/bin/docker compose --env-file __REPO_ROOT__/.env -f __REPO_ROOT__/compose/compose.yml up -d
+ExecStop=/usr/bin/docker compose --env-file __REPO_ROOT__/.env -f __REPO_ROOT__/compose/compose.yml down
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

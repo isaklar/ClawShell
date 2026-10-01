@@ -1,0 +1,9 @@
+[Unit]
+Description=clawshell healthcheck (logs summary, exits non-zero on degraded state)
+
+[Service]
+Type=oneshot
+WorkingDirectory=__REPO_ROOT__
+ExecStart=__REPO_ROOT__/scripts/healthcheck.sh
+StandardOutput=journal
+StandardError=journal
