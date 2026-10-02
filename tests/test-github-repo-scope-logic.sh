@@ -34,15 +34,15 @@ def check(name, cond):
 # git smart-HTTP clone/fetch/push paths -> matched.
 check(
     "github.com clone path matched",
-    qg._extract_github_repo("github.com", "/isaklar/clawshell.git/info/refs") == "isaklar/clawshell",
+    qg._extract_github_repo("github.com", "/exampleorg/target-repo.git/info/refs") == "exampleorg/target-repo",
 )
 check(
     "github.com upload-pack path matched",
-    qg._extract_github_repo("github.com", "/isaklar/clawshell.git/git-upload-pack") == "isaklar/clawshell",
+    qg._extract_github_repo("github.com", "/exampleorg/target-repo.git/git-upload-pack") == "exampleorg/target-repo",
 )
 check(
     "github.com receive-pack (push) path matched",
-    qg._extract_github_repo("github.com", "/isaklar/clawshell.git/git-receive-pack") == "isaklar/clawshell",
+    qg._extract_github_repo("github.com", "/exampleorg/target-repo.git/git-receive-pack") == "exampleorg/target-repo",
 )
 
 # Non-repo github.com paths must NOT be matched (auth flows must never break).
@@ -58,13 +58,13 @@ check(
 # codeload.github.com archive downloads -> matched.
 check(
     "codeload.github.com archive path matched",
-    qg._extract_github_repo("codeload.github.com", "/isaklar/clawshell/tar.gz/main") == "isaklar/clawshell",
+    qg._extract_github_repo("codeload.github.com", "/exampleorg/target-repo/tar.gz/main") == "exampleorg/target-repo",
 )
 
 # api.github.com repo-scoped REST calls -> matched; non-repo calls -> not.
 check(
     "api.github.com repos/ path matched",
-    qg._extract_github_repo("api.github.com", "/repos/isaklar/clawshell/pulls") == "isaklar/clawshell",
+    qg._extract_github_repo("api.github.com", "/repos/exampleorg/target-repo/pulls") == "exampleorg/target-repo",
 )
 check(
     "api.github.com /user NOT matched (fail open)",
@@ -76,11 +76,11 @@ check(
 )
 
 # _allowed_github_repos(): comma-separated, whitespace-tolerant, lowercased.
-os.environ["GITHUB_ALLOWED_REPOS"] = "IsakLar/Agent-Server, someorg/other"
+os.environ["GITHUB_ALLOWED_REPOS"] = "ExampleOrg/Target-Repo, someorg/other"
 allowed = qg._allowed_github_repos()
 check(
     "_allowed_github_repos lowercases + trims + splits",
-    allowed == {"isaklar/clawshell", "someorg/other"},
+    allowed == {"exampleorg/target-repo", "someorg/other"},
 )
 
 os.environ["GITHUB_ALLOWED_REPOS"] = ""
