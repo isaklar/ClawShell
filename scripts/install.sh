@@ -74,7 +74,7 @@ if [[ "${MODEL_PROVIDER:-local-gpu}" == "local-gpu" ]]; then
     fi
   elif ! command -v nvidia-smi >/dev/null 2>&1; then
     warn "MODEL_PROVIDER=local-gpu but no NVIDIA driver (nvidia-smi) was found."
-    warn "Install the NVIDIA GPU driver for your RTX 6000 Ada first, then re-run install.sh."
+    warn "Install the NVIDIA GPU driver for your card first, then re-run install.sh."
     warn "(Or set LOCAL_LLM_BACKEND=amd-rocm for a Radeon card, or switch MODEL_PROVIDER to a hosted provider — see docs/gpu.md.)"
   fi
   if [[ "${LOCAL_LLM_BACKEND:-nvidia}" == "nvidia" ]]; then

@@ -26,11 +26,12 @@ volume.
 
 ## 1. `MODEL_PROVIDER=local-gpu` (default, on-box GPU, no credentials)
 
-This is the headline mode. Inference runs **entirely on this machine** on the
-NVIDIA RTX 6000 Ada 96 GB GPU via the `local-llm` vLLM service, which exposes an
-OpenAI-compatible API on the internal `clawshell-inference` network. The
-engagement data, target code, requirement spec, findings, **never leaves the
-box** for a third-party provider.
+This is the headline mode. Inference runs **entirely on this machine** on a
+CUDA-capable NVIDIA GPU (for example an RTX 6000 Ada 96 GB) via the `local-llm`
+vLLM service, or an AMD Radeon card via the `local-llm-amd` service, which
+exposes an OpenAI-compatible API on the internal `clawshell-inference` network.
+The engagement data, target code, requirement spec, findings, **never leaves
+the box** for a third-party provider.
 
 - **No API key.** vLLM ignores the API key, but OpenClaw still requires a value
   to be present, so `config/openclaw.json5.example` uses a fixed dummy value

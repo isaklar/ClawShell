@@ -48,8 +48,8 @@ Edit `.env`:
   LOCAL_LLM_MODEL=qwen2.5-coder:14b
   ```
 
-See `docs/gpu.md` for model/VRAM guidance (a 24 GB card should use
-`qwen2.5-coder:14b`, not the 96 GB NVIDIA default).
+See [gpu.md](gpu.md) for model/VRAM guidance (a smaller card, say 24 GB, should
+use a smaller model like `qwen2.5-coder:14b` rather than the larger default).
 
 ### 4. Stage the model once
 
