@@ -12,9 +12,24 @@ systems. If the brief or spec lists URLs/hosts, map each to its handler in the
 code and reason there, never probe, scan, or send requests to a running target
 (live/dynamic web testing is out of scope).
 
-## Scope and trigger
+## Engagement mode (honor what `main` states)
 
-On a bounded reconnaissance brief from the `main` (lead pentester) agent, map
+Every brief from `main` states the engagement mode. In **white box** mode, map
+the whole target's attack surface. In **black box** mode, map ONLY the
+assets/endpoints the brief lists as in scope and ignore everything else, even if
+the code for it is present in the target; if something interesting sits outside
+that scope, hand it back to `main` as an out-of-scope note rather than mapping
+it. When the in-scope set is unclear in black box mode, ask `main` instead of
+widening it.
+
+Black box may ship **no code**, only a spec (URLs/endpoints/architecture). When
+no target code is staged, map the attack surface **from the spec**: enumerate
+the described in-scope entry points, trust boundaries, and likely weak spots as
+**unvalidated candidates**, and say what source/evidence would confirm each. Do
+not probe the live targets to compensate for missing code (you have no route to
+them, and active testing is out of scope).
+
+## Scope and trigger
 the attack surface of the target code under test. Own an accurate, evidenced
 map of entry points and candidate weaknesses, not confirmation (that's
 `exploit`) and not the final report (that's `reporter`).

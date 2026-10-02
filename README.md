@@ -141,7 +141,9 @@ OpenClaw Control UI, and talk to the **Lead Pentester**:
 
 The requirement spec can be **attached directly in the chat** (OpenClaw's
 Control UI supports PDF / Markdown / text document uploads) or dropped at
-`engagement/spec/`. No per-run script needed.
+`engagement/spec/`. No per-run script needed. If the spec does not state the
+engagement mode, the Lead Pentester will ask **black box or white box** before
+it starts (see below).
 
 **2. Headless / scriptable.** For CI or batch runs, use the launcher, which
 also wraps the run in a quota-guard task with hard limits:
@@ -150,11 +152,13 @@ also wraps the run in a quota-guard task with hard limits:
 ./scripts/pentest-task.sh \
   --spec ./engagements/acme-api/requirements.md \
   --target ./code-drops/acme-api \
+  --mode white-box \
   --max-runtime 2h --max-ai-requests 100
 ```
 
 `--spec` is the requirement spec (scope, rules of engagement, required report
-format); `--target` is a local path or a git URL. The launcher stages the spec
+format); `--target` is a local path or a git URL; `--mode` is `white-box`
+(default) or `black-box` (see below). The launcher stages the spec
 at `engagement/spec/<file>` and the target at `engagement/target/` (host-side
 copy for local paths, host-side shallow `git clone` for URLs, the sandbox has
 no egress to clone), both mounted **read-only**, then runs the lead pentester
@@ -183,6 +187,30 @@ By default an engagement goes to `main`, the **Lead Pentester** that reads
 the spec, plans the engagement, and delegates to three isolated specialists: **Recon** (`recon`, attack-surface mapping), **Exploit** (`exploit`,
 *vulnerability confirmation & impact analysis* by static reasoning, **no live
 exploitation**), and **Reporter** (`reporter`, writes the findings report).
+
+### Black box vs white box
+
+Every engagement runs in one of two modes. The Lead Pentester fixes the mode
+**before** any analysis: it uses what the spec says, or the `--mode` flag on a
+headless run, and otherwise asks you in chat.
+
+* **White box (default): full-knowledge review.** The agents may use the entire
+  target, all source, config, and internal docs. Everything in `engagement/target/`
+  is in scope unless the spec explicitly excludes it.
+* **Black box: external-attacker perspective, strict scope.** The agents analyze
+  **only** the assets, endpoints, and interfaces the spec explicitly lists as in
+  scope and treat everything else as out of scope, even though the full source is
+  present. In this mode scope is a **hard boundary**: if the spec is ambiguous, or
+  a lead points at code that is not clearly in scope, the team stops and asks
+  rather than widening scope on its own. Black box does **not** require source:
+  if the spec ships only URLs/endpoints and no code (omit `--target`), the team
+  produces a spec/design-level assessment instead: a threat model, likely
+  weakness classes, and a prioritized test plan, with every item flagged as an
+  unvalidated hypothesis.
+
+Both modes are strictly **read-only static analysis**; "black box" here means
+scope discipline and attacker viewpoint, not live/dynamic testing (always out of
+scope). The active mode is recorded in the report's scope section.
 Pass `--agent recon|exploit|reporter` to target a specialist directly instead.
 See `docs/pentest-team.md` for the full team topology, delegation flow, and
 how to add/remove/reassign models per agent.
