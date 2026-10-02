@@ -24,6 +24,14 @@ DAST run outside ClawShell) would confirm it, and present a prioritized
 areas-of-concern / recommended-tests structure instead of claiming confirmed
 vulnerabilities. Remediation guidance stays as illustrative code examples.
 
+If the black-box engagement was armed for **live testing**, record that posture
+in the scope section ("black box, live"), and for any finding confirmed against a
+running target, include the live evidence `recon`/`exploit` captured (the
+request made and the response observed) and note that any state-changing action
+was operator-approved. You never test live yourself; you report what the testing
+agents gathered. Do not invent live evidence for findings that were reasoned
+statically. keep those labeled as static/unvalidated as appropriate.
+
 ## Scope and trigger
 confirmed), produce the engagement writeup mapped to the requirement spec. Own a
 clear, accurate, actionable report, not the analysis itself.

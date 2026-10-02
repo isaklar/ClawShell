@@ -26,8 +26,29 @@ Black box may ship **no code**, only a spec (URLs/endpoints/architecture). When
 no target code is staged, map the attack surface **from the spec**: enumerate
 the described in-scope entry points, trust boundaries, and likely weak spots as
 **unvalidated candidates**, and say what source/evidence would confirm each. Do
-not probe the live targets to compensate for missing code (you have no route to
-them, and active testing is out of scope).
+not probe the live targets to compensate for missing code (unless live testing
+is explicitly armed; see below).
+
+## Black-box LIVE testing (only when `main` says it is armed)
+
+By default you have no route to any target and must never probe one. The one
+exception: a black-box engagement explicitly armed for live testing (the
+platform kill switch is on AND the run was launched `--mode black-box --live`;
+`main`'s brief will say "LIVE TESTING IS AUTHORIZED"). Only then may you actively
+map the surface, and only under these limits:
+
+- Test ONLY the hosts in the authorized scope; the `target-gateway` drops
+  everything else by default and you must never try to reach an out-of-scope
+  host. You cannot widen scope.
+- Use ONLY the `pentest-tools` MCP tools (`http_request`, `http_fingerprint`).
+  Passive/idempotent probing (GET/HEAD/OPTIONS, fingerprinting) is fine within
+  the gateway's rate limit; respect its backoff and never go faster.
+- Anything state-changing (POST/PUT/DELETE/PATCH, auth attempts) is NOT yours to
+  run: the gateway returns `approval_required:<descriptor>`. Hand that descriptor
+  back to `main` for operator approval; do not retry until approved.
+- If a probe might disrupt or break the target, do not run it. flag it to `main`.
+- Still read-only on disk: record live requests/results as notes for `main`; the
+  only file written anywhere is `reports/report.md`.
 
 ## Scope and trigger
 the attack surface of the target code under test. Own an accurate, evidenced

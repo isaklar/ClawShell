@@ -473,6 +473,7 @@ services:
       # the agent cannot widen it). Read-only to the gateway.
       - ../engagement/scope:/scope:ro
     environment:
+      BLACKBOX_LIVE_TESTING: "${BLACKBOX_LIVE_TESTING:-false}"
       TARGET_RATE_DEFAULT: "${TARGET_RATE_DEFAULT:-5}"
       TARGET_MAX_CONCURRENCY: "${TARGET_MAX_CONCURRENCY:-2}"
       TARGET_RATE_SAFETY_FACTOR: "${TARGET_RATE_SAFETY_FACTOR:-0.8}"
@@ -516,6 +517,7 @@ services:
       - clawshell-mcp
       - clawshell-target
     environment:
+      BLACKBOX_LIVE_TESTING: "${BLACKBOX_LIVE_TESTING:-false}"
       TARGET_GATEWAY_PROXY: "http://target-gateway:8080"
     read_only: true
     tmpfs:

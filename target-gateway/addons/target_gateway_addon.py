@@ -32,11 +32,14 @@ from __future__ import annotations
 
 import json
 import os
+import socket
+import ipaddress
 import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+from urllib.parse import unquote, urlparse, parse_qs
 
 from mitmproxy import http, ctx
 
@@ -56,7 +59,101 @@ SAFETY_FACTOR = float(os.environ.get("TARGET_RATE_SAFETY_FACTOR", "0.8")) # stay
 # Everything else is potentially state-changing and needs operator approval.
 IDEMPOTENT_METHODS = {"GET", "HEAD", "OPTIONS"}
 
+# Headers (and query params) frameworks use to tunnel a different HTTP verb. An
+# agent could otherwise smuggle a DELETE through a Tier-0 GET; we gate on the
+# EFFECTIVE method so these cannot bypass the approval gate.
+METHOD_OVERRIDE_HEADERS = ("x-http-method-override", "x-http-method", "x-method-override")
+METHOD_OVERRIDE_QUERY_KEYS = ("_method", "_httpmethod")
+
+# Encoded path separators / dot segments used to smuggle a path past the
+# approval descriptor (e.g. /feedback/%2e%2e/admin decoding to /admin on the
+# target). Any request carrying these is refused outright.
+ENCODED_PATH_MARKERS = ("%2e", "%2f", "%5c")
+
+# Scope names that must never be honored even if an operator lists them: they
+# point back at the gateway/host itself (loopback control API, etc.).
+BLOCKED_SCOPE_NAMES = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+
 MAX_BACKOFF_SECONDS = 15 * 60
+
+
+def _effective_method(request: "http.Request") -> str:
+    """The method the TARGET will actually act on, accounting for verb-tunneling
+    override headers/params. Used for the approval decision so a GET cannot carry
+    a hidden DELETE past the Tier-0 auto-allow."""
+    for h in METHOD_OVERRIDE_HEADERS:
+        ov = request.headers.get(h)
+        if ov and ov.strip():
+            return ov.strip().upper()
+    try:
+        qs = parse_qs(urlparse(request.path).query)
+        for key in METHOD_OVERRIDE_QUERY_KEYS:
+            for actual in qs:
+                if actual.lower() == key and qs[actual]:
+                    return qs[actual][0].strip().upper()
+    except Exception:
+        pass
+    return request.method.upper()
+
+
+def _path_is_suspicious(raw_path: str) -> bool:
+    """True if the path uses encoded separators or dot-segment traversal. Such a
+    path means the descriptor the operator approves would not match what the
+    target actually resolves, so we refuse it rather than guess."""
+    p = raw_path.split("?", 1)[0]
+    low = p.lower()
+    if any(m in low for m in ENCODED_PATH_MARKERS):
+        return True
+    decoded = unquote(p)
+    return ".." in decoded.split("/")
+
+
+def _normalize_path(raw_path: str) -> str:
+    """Decode and collapse a path to a canonical form for the approval
+    descriptor. Only called after _path_is_suspicious() has rejected traversal,
+    so this is defense in depth."""
+    p = unquote(raw_path.split("?", 1)[0])
+    parts: list[str] = []
+    for seg in p.split("/"):
+        if seg in ("", "."):
+            continue
+        if seg == "..":
+            if parts:
+                parts.pop()
+            continue
+        parts.append(seg)
+    return "/" + "/".join(parts)
+
+
+def _addr_is_internal(ip: str) -> bool:
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return (addr.is_private or addr.is_loopback or addr.is_link_local
+            or addr.is_multicast or addr.is_reserved or addr.is_unspecified)
+
+
+def _resolution_blocked(host: str) -> Optional[str]:
+    """Return an offending address if `host` is (or resolves to) a loopback,
+    link-local (incl. cloud metadata 169.254.169.254), private, multicast, or
+    reserved address. Blocks SSRF into internal services and the gateway's own
+    loopback control API via an in-scope name, and most DNS-rebinding attempts.
+    Resolution failures are left to mitmproxy (which fails the connection)."""
+    try:
+        ipaddress.ip_address(host)
+        return host if _addr_is_internal(host) else None
+    except ValueError:
+        pass
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        return None
+    for info in infos:
+        ip = info[4][0]
+        if _addr_is_internal(ip):
+            return ip
+    return None
 
 
 def _now() -> float:
@@ -184,10 +281,10 @@ def _host_in_scope(host: str, port: int, scope: set[str]) -> bool:
 
 
 def _descriptor(method: str, host: str, port: int, path: str) -> str:
-    """Stable, human-readable approval token for a risky request. Path is reduced
-    to its first segment so one approval covers an endpoint, not a single URL."""
-    first_seg = "/" + path.lstrip("/").split("/", 1)[0].split("?", 1)[0]
-    return f"{method} {host}:{port}{first_seg}"
+    """Stable, human-readable approval token for a risky request. The FULL
+    normalized path is included so one approval covers exactly one endpoint and
+    cannot be stretched to sibling endpoints under the same first segment."""
+    return f"{method} {host}:{port}{_normalize_path(path)}"
 
 
 class TargetGateway:
@@ -206,6 +303,7 @@ class TargetGateway:
     def _deny(self, flow: http.HTTPFlow, host: str, port: int, reason: str, code: int = 403,
               headers: Optional[dict] = None) -> None:
         self.state.denied_count += 1
+        flow.metadata["tg_denied"] = True
         self._evidence(
             {"decision": "deny", "reason": reason, "method": flow.request.method,
              "host": host, "port": port, "path": flow.request.path},
@@ -231,9 +329,30 @@ class TargetGateway:
             self._deny(flow, host, port, "out_of_scope")
             return
 
+        # Guarantee 1b: refuse encoded traversal / path-smuggling so the approval
+        # descriptor always reflects what the target will resolve.
+        if _path_is_suspicious(flow.request.path):
+            self._deny(flow, host, port, "suspicious_path")
+            return
+
+        # Guarantee 1c: never let an in-scope NAME reach an internal/loopback/
+        # metadata address (SSRF / DNS-rebind into internal services or the
+        # gateway's own control API).
+        if host in BLOCKED_SCOPE_NAMES:
+            self._deny(flow, host, port, "blocked_internal_host")
+            return
+        blocked_ip = _resolution_blocked(host)
+        if blocked_ip is not None:
+            self._deny(flow, host, port, f"blocked_internal_address:{blocked_ip}")
+            return
+
         # Guarantee 3a: approval gate for non-idempotent (state-changing) methods.
-        if method not in IDEMPOTENT_METHODS:
-            descriptor = _descriptor(method, host, port, flow.request.path)
+        # Gate on the EFFECTIVE method so a Tier-0 GET cannot tunnel a DELETE via
+        # a method-override header/param.
+        eff_method = _effective_method(flow.request)
+        if method not in IDEMPOTENT_METHODS or eff_method not in IDEMPOTENT_METHODS:
+            gate_method = method if method not in IDEMPOTENT_METHODS else eff_method
+            descriptor = _descriptor(gate_method, host, port, flow.request.path)
             if descriptor not in approvals:
                 self._deny(
                     flow, host, port, f"approval_required:{descriptor}", code=403
@@ -273,6 +392,11 @@ class TargetGateway:
             with self.state._lock:
                 self.state.in_flight = max(self.state.in_flight - 1, 0)
         if flow.response is None:
+            return
+        # Denied flows carry a gateway-synthesized response (403/429). Logging
+        # them as "forward" and feeding our own synthetic 429 into the adaptive
+        # backoff would corrupt the evidence log and throttle ourselves.
+        if flow.metadata.get("tg_denied"):
             return
         host = flow.request.pretty_host.lower()
         status = flow.response.status_code
