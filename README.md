@@ -9,11 +9,8 @@
       |_|
 ```
 
-<<<<<<< HEAD
-=======
 [![CI](https://github.com/isaklar/ClawShell/actions/workflows/ci.yml/badge.svg)](https://github.com/isaklar/ClawShell/actions/workflows/ci.yml)
 
->>>>>>> 05b82e0 (Prepare repository for ruleset)
 A small, always-on, hard-sandboxed, **GPU-first code security analysis /
 penetration-testing platform**. It runs
 [OpenClaw](https://github.com/openclaw/openclaw) (MIT-licensed) in Docker on any
