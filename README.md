@@ -17,15 +17,17 @@ provider** (`github-copilot`/`anthropic`/`openai`/`custom`, see
 `docs/credentials.md`) by changing one variable, but local-GPU is the headline
 default.
 
-ClawShell is strictly **read-only**, and its scope is **static analysis of
-source code**, not live/dynamic testing of running systems (DAST). A team of
+ClawShell is **read-only by default**, and its core scope is **static analysis
+of source code**, not live/dynamic testing of running systems (DAST). A team of
 four pentest agents analyzes a target against a requirement spec and **only
 reads** the target code; it never modifies, patches, "fixes", refactors,
-deletes, or runs destructive/exploit actions against it, and it never probes,
-scans, or sends requests to live hosts. If a spec only lists URLs/endpoints with
-no code, that work is out of scope: the agents note it in the report and ask for
-the source instead. The target is mounted **read-only** (`:ro`) at
-`engagement/target/` so the filesystem itself rejects any write, and the
+deletes, or runs destructive/exploit actions against it, and by default it never
+probes, scans, or sends requests to live hosts. If a spec only lists
+URLs/endpoints with no code, the team produces a spec/design-level assessment
+(and, when the operator explicitly arms **black-box live testing**, may perform
+scoped, rate-limited, approval-gated dynamic testing of the authorized targets.
+see `docs/blackbox-live-testing.md`). The target is mounted **read-only** (`:ro`)
+at `engagement/target/` so the filesystem itself rejects any write, and the
 **only** artifact any agent writes is a markdown findings report under
 `reports/` (remediation suggestions appear there as code snippets, never
 applied to the project). All of this is boxed in by a deny-by-default network
@@ -141,7 +143,9 @@ OpenClaw Control UI, and talk to the **Lead Pentester**:
 
 The requirement spec can be **attached directly in the chat** (OpenClaw's
 Control UI supports PDF / Markdown / text document uploads) or dropped at
-`engagement/spec/`. No per-run script needed.
+`engagement/spec/`. No per-run script needed. If the spec does not state the
+engagement mode, the Lead Pentester will ask **black box or white box** before
+it starts (see below).
 
 **2. Headless / scriptable.** For CI or batch runs, use the launcher, which
 also wraps the run in a quota-guard task with hard limits:
@@ -150,11 +154,13 @@ also wraps the run in a quota-guard task with hard limits:
 ./scripts/pentest-task.sh \
   --spec ./engagements/acme-api/requirements.md \
   --target ./code-drops/acme-api \
+  --mode white-box \
   --max-runtime 2h --max-ai-requests 100
 ```
 
 `--spec` is the requirement spec (scope, rules of engagement, required report
-format); `--target` is a local path or a git URL. The launcher stages the spec
+format); `--target` is a local path or a git URL; `--mode` is `white-box`
+(default) or `black-box` (see below). The launcher stages the spec
 at `engagement/spec/<file>` and the target at `engagement/target/` (host-side
 copy for local paths, host-side shallow `git clone` for URLs, the sandbox has
 no egress to clone), both mounted **read-only**, then runs the lead pentester
@@ -183,14 +189,60 @@ By default an engagement goes to `main`, the **Lead Pentester** that reads
 the spec, plans the engagement, and delegates to three isolated specialists: **Recon** (`recon`, attack-surface mapping), **Exploit** (`exploit`,
 *vulnerability confirmation & impact analysis* by static reasoning, **no live
 exploitation**), and **Reporter** (`reporter`, writes the findings report).
+
+### Black box vs white box
+
+Every engagement runs in one of two modes. The Lead Pentester fixes the mode
+**before** any analysis: it uses what the spec says, or the `--mode` flag on a
+headless run, and otherwise asks you in chat.
+
+* **White box (default): full-knowledge review.** The agents may use the entire
+  target, all source, config, and internal docs. Everything in `engagement/target/`
+  is in scope unless the spec explicitly excludes it.
+* **Black box: external-attacker perspective, strict scope.** The agents analyze
+  **only** the assets, endpoints, and interfaces the spec explicitly lists as in
+  scope and treat everything else as out of scope, even though the full source is
+  present. In this mode scope is a **hard boundary**: if the spec is ambiguous, or
+  a lead points at code that is not clearly in scope, the team stops and asks
+  rather than widening scope on its own. Black box does **not** require source:
+  if the spec ships only URLs/endpoints and no code (omit `--target`), the team
+  produces a spec/design-level assessment instead: a threat model, likely
+  weakness classes, and a prioritized test plan, with every item flagged as an
+  unvalidated hypothesis.
+
+Both modes are read-only static analysis by default; "black box" here means
+scope discipline and attacker viewpoint, not live/dynamic testing. A black-box
+engagement MAY additionally be armed for **scoped live testing** (see below);
+white box is always read-only. The active mode is recorded in the report's scope
+section.
 Pass `--agent recon|exploit|reporter` to target a specialist directly instead.
 See `docs/pentest-team.md` for the full team topology, delegation flow, and
 how to add/remove/reassign models per agent.
 
-This is **read-only by design**: the `engagement/` mount is `:ro`, so no agent
+This is **read-only by default**: the `engagement/` mount is `:ro`, so no agent
 can modify, patch, "fix", refactor, delete, or write to the target even if
 asked, the only writable output is the report under `reports/`. Cancel a
 running headless engagement with `./scripts/pentest-task.sh cancel <task-id>`.
+
+### Black-box live testing (opt-in, scoped)
+
+Some black-box engagements need real **dynamic** testing of a running target.
+ClawShell supports this, but it is **off by default** and tightly fenced:
+
+* It activates only when the operator sets `BLACKBOX_LIVE_TESTING=true` AND
+  launches `--mode black-box --live --scope-file <scope.conf>`. Everything else
+  stays read-only/air-gapped.
+* A dedicated, deny-by-default network boundary (`target-gateway`) forwards
+  traffic **only** to the spec-authorized hosts in the scope file. anything else
+  (including any tool trying to "phone home") is dropped. The agents cannot
+  widen scope; only you can edit the scope file.
+* The agents reach targets **only** through a curated, safe-by-design toolset
+  (the `pentest-tools` MCP server). Passive, idempotent requests are rate-limited
+  (honoring the spec's stated limit, or a gentle default); any state-changing or
+  potentially disruptive action is **held for human approval**
+  (`./scripts/scope.sh approve '<descriptor>'`).
+
+Full detail, risk tiers, and the approval flow: `docs/blackbox-live-testing.md`.
 
 The task is hard-capped on runtime and AI-request count (which, under
 local-GPU, also bound GPU time), and its status/stop reason is always
@@ -250,6 +302,7 @@ directly (e.g. `./tests/test-static-validation.sh`) for faster iteration.
 * `docs/pentest-team.md`: the 4-agent pentest team (Lead Pentester + Recon/Exploit/Reporter), delegation, per-agent models, the read-only/report-only rules, sandboxing
 * `docs/security.md`: host hardening, credentials, full threat model
 * `docs/networking.md`: Docker network topology, egress allowlist, nftables/DOCKER-USER
+* `docs/blackbox-live-testing.md`: opt-in scoped live testing: the two egress lanes, target-gateway, the pentest-tools MCP toolset, risk tiers, rate limits, and the operator approval flow
 * `docs/quota-protection.md`: circuit breaker state machine, per-task limits, defaults
 * `docs/caveman-integration.md`: [caveman](https://github.com/JuliusBrussee/caveman) token-reduction skill (on by default) and experimental proxy (off by default)
 * `docs/credentials.md`: the model-provider decision (local-GPU by default; hosted providers optional)

@@ -59,9 +59,15 @@
       // spec are all on-box; the egress allowlist would block the underlying
       // HTTP call anyway, but denying the tool itself avoids agents burning
       // AI requests/iterations on calls guaranteed to fail.
+      //
+      // group:mcp is the curated black-box live-testing toolset served by the
+      // pentest-tools-mcp server (see mcpServers below). Denied here so it is
+      // deny-by-default for EVERY agent; only recon/exploit re-allow specific
+      // Tier 0 tools, and even then the tools only exist when the
+      // blackbox-live profile is up AND an engagement scope is armed.
       tools: {
         profile: "coding",
-        deny: ["group:web"],
+        deny: ["group:web", "group:mcp"],
       },
       // Same-agent ephemeral sub-agents (e.g. recon fanning out to map two
       // modules in parallel) work via sessions_spawn with no agentId — that's
@@ -116,9 +122,17 @@
         subagents: { allowAgents: [] }, // specialists do not delegate further
         // web_search only (snippets for CVE/technology lookups) — NOT
         // web_fetch. Only main (the lead) gets arbitrary-URL fetching.
+        //
+        // Black-box live testing: recon re-allows the two Tier 0 (passive,
+        // idempotent) MCP tools so it can fingerprint/probe in-scope targets.
+        // Every call is still routed through target-gateway (deny-by-default,
+        // in-scope-only, rate-limited). No effect in white-box/spec-only runs
+        // (the pentest-tools-mcp server is not running, so the tools do not
+        // appear). See docs/blackbox-live-testing.md.
         tools: {
           profile: "coding",
           deny: ["web_fetch", "x_search"],
+          allow: ["pentest-tools/http_request", "pentest-tools/http_fingerprint"],
         },
       },
       exploit: {
@@ -127,7 +141,16 @@
         // No web tools at all (inherits agents.defaults group:web deny) — this
         // agent reasons about and proof-of-concepts vulnerabilities strictly
         // against the on-box target inside the sandbox.
+        //
+        // Black-box live testing: exploit re-allows http_request to validate
+        // findings against in-scope targets. State-changing / non-idempotent
+        // requests are NOT auto-run: target-gateway returns approval_required
+        // and a human operator must approve each one (scripts/scope.sh).
         subagents: { allowAgents: [] },
+        tools: {
+          profile: "coding",
+          allow: ["pentest-tools/http_request"],
+        },
       },
       reporter: {
         workspace: "/home/node/workspace/reporter",
@@ -205,6 +228,38 @@
   plugins: {
     entries: {
       duckduckgo: {},
+    },
+  },
+
+  // Curated pentest-tools MCP server (black-box LIVE testing only).
+  //
+  // This connects the Gateway to the pentest-tools-mcp service, which exposes a
+  // small set of SAFE-BY-DESIGN tools (group:mcp) to the agents. It is
+  // deny-by-default for every agent (agents.defaults denies group:mcp); only
+  // recon/exploit re-allow specific Tier 0 tools above.
+  //
+  // IMPORTANT: this is ARMED BY SCOPE, not by this file. The pentest-tools-mcp
+  // and target-gateway services only start under the `blackbox-live` Compose
+  // profile, which scripts/pentest-task.sh brings up ONLY for an authorized
+  // black-box engagement with a staged scope file. In white-box / spec-only /
+  // local-LLM-idle deployments the server below is simply unreachable, so the
+  // tools never materialize and the agents stay strictly read-only. Every tool
+  // call is additionally forced through target-gateway (deny-by-default,
+  // in-scope-only, rate-limited, approval-gated). See
+  // docs/blackbox-live-testing.md.
+  mcpServers: {
+    entries: {
+      "pentest-tools": {
+        // Internal compose hostname; reachable only over clawshell-mcp (an
+        // internal network with no route out). Streamable-HTTP transport.
+        url: "http://pentest-tools-mcp:8765/mcp",
+        transport: "streamable-http",
+        // Tools from this server are grouped under group:mcp for tool-policy.
+        toolGroup: "mcp",
+        // Do not fail Gateway startup if the server is absent (the normal case
+        // for non-black-box deployments where the profile is down).
+        optional: true,
+      },
     },
   },
 

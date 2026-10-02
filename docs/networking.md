@@ -40,6 +40,9 @@ Internet
 | `clawshell-sandbox` | **None** | No (except an optional explicit allowlist.d/ rule, see below) | OpenClaw's tool-execution sandbox containers via nested rootless DinD |
 | `clawshell-control` (internal, loopback-published) | N/A | Published to LAN CIDR only, if you choose | Control UI / Gateway API |
 | `clawshell-inference` (internal) | **None** | No | Gateway ⇄ `local-llm` GPU model server (only when `MODEL_PROVIDER=local-gpu`) |
+| `clawshell-mcp` (internal) | **None** | No | Gateway ⇄ `pentest-tools-mcp` (only when the `blackbox-live` profile is up) |
+| `clawshell-target` (internal) | **None** | No | `pentest-tools-mcp` ⇄ `target-gateway` (black-box live lane) |
+| `clawshell-target-uplink` | Only via `target-gateway` (deny-by-default, in-scope only) | No | `target-gateway` → authorized live-testing targets |
 
 > **GPU inference stays on-box.** When `MODEL_PROVIDER=local-gpu` (the default),
 > the model server, `local-llm` (NVIDIA/vLLM) or `local-llm-amd` (AMD/ROCm,
@@ -47,6 +50,15 @@ Internet
 > `clawshell-inference` network with no published ports and no internet route, > reachable solely by `openclaw-gateway`. Model tokens never traverse
 > quota-guard (there is no external spend), and engagement data never leaves the
 > host. See `docs/gpu.md`.
+
+> **Two separate egress lanes.** quota-guard is the **AI-provider** lane (a SaaS
+> cost/quota guardrail, mostly idle on local-GPU). The last three networks above
+> form a **completely separate target lane** used only for opt-in black-box live
+> testing: `target-gateway` is the single container that can reach a target, and
+> it enforces deny-by-default, in-scope-only, rate-limited, approval-gated egress
+> on `clawshell-target-uplink`. The two lanes share no state. The `blackbox-live`
+> Compose profile (and therefore these networks carrying any traffic) is up only
+> for an armed live engagement. See `docs/blackbox-live-testing.md`.
 
 ## Egress allowlist (quota-guard)
 
