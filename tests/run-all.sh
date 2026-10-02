@@ -11,6 +11,8 @@ STATIC_TESTS=(
   tests/test-static-validation.sh
   tests/test-credential-provider-logic.sh
   tests/test-github-repo-scope-logic.sh
+  tests/test-blackbox-killswitch.sh
+  tests/test-python-unit.sh
 )
 LIVE_TESTS=(
   tests/test-filesystem-isolation.sh
