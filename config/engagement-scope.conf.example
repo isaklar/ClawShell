@@ -1,0 +1,52 @@
+# Per-engagement TARGET SCOPE for black-box LIVE testing (target-gateway).
+#
+# This file is the single source of truth for what the pentest agents are
+# allowed to touch over the network during a black-box live engagement. It is
+# DENY-BY-DEFAULT: if a host is not listed here, every request to it is dropped
+# at target-gateway, no matter which tool or agent asked. The agents CANNOT
+# widen this scope; only the human operator edits it, and it is mounted
+# read-only into target-gateway.
+#
+# Copy the authorized targets out of the signed requirement spec / rules of
+# engagement into this file, then arm the engagement with:
+#
+#   ./scripts/pentest-task.sh --mode blackbox --live \
+#       --scope-file config/engagement-scope.conf   "<task...>"
+#
+# (The launcher stages this file into engagement/scope/ where target-gateway
+# reads it. See docs/blackbox-live-testing.md.)
+#
+# --------------------------------------------------------------------------
+# FORMAT  (same as config/allowlist.conf):
+#   host[:port]            exact host, optionally pinned to a port
+#   *.suffix[:port]        wildcard: the apex and any subdomain of suffix
+#   # comment              a full-line comment
+#
+# Optional per-host RATE directive (honor a spec-stated request-rate limit so
+# the target is not slowed or blocked). Put it as a trailing comment:
+#   api.example.com:443   # rate: 3     -> cap this host at 3 req/s
+# When a host has no "# rate:" directive the gateway falls back to
+# TARGET_RATE_DEFAULT (.env). Either way the cap is multiplied by
+# TARGET_RATE_SAFETY_FACTOR to stay comfortably under the stated limit, and the
+# gateway backs off further if the target returns 429/503/Retry-After.
+# --------------------------------------------------------------------------
+#
+# Nothing is in scope by default. Uncomment / add ONLY the hosts the spec
+# authorizes. Examples (replace with the real authorized targets):
+
+# A single authorized web application, spec says "max 3 requests/second":
+# app.example-target.com:443    # rate: 3
+
+# Its API host, no stated limit -> uses TARGET_RATE_DEFAULT:
+# api.example-target.com:443
+
+# An authorized staging subdomain tree (apex + all subdomains):
+# *.staging.example-target.com:443
+
+# IMPORTANT
+# - Do NOT add third-party / shared-infrastructure hosts (CDNs, analytics,
+#   login providers) unless the spec explicitly authorizes them. Out-of-scope
+#   egress (including any tool trying to "phone home") is dropped here by
+#   design, which is exactly what keeps testing inside the sandbox.
+# - Prefer HTTPS targets (:443). Weak target TLS is reported as a finding, not
+#   a reason to disable verification elsewhere.

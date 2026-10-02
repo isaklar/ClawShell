@@ -32,6 +32,23 @@ networks:
   # a real route to the internet. Nothing else in this compose file joins it.
   clawshell-uplink:
     driver: bridge
+  # --- Black-box live-testing lanes (profile: blackbox-live) ----------------
+  # These are only used when a black-box live engagement is armed. On a normal
+  # white-box / spec-only / local-LLM deployment the profiled services below
+  # never start, so these networks carry no traffic.
+  #   clawshell-mcp    : Gateway <-> pentest-tools-mcp (internal, no route out).
+  #   clawshell-target : pentest-tools-mcp <-> target-gateway (internal). Forces
+  #                      every tool request through the scoped target-gateway.
+  clawshell-mcp:
+    driver: bridge
+    internal: true
+  clawshell-target:
+    driver: bridge
+    internal: true
+  # The ONLY route from the black-box lane to the internet. Attached solely to
+  # target-gateway, which enforces deny-by-default in-scope-only egress on it.
+  clawshell-target-uplink:
+    driver: bridge
 
 secrets:
   gateway_token:
@@ -101,6 +118,9 @@ services:
       - clawshell-egress
       - clawshell-sandbox
       - clawshell-inference
+      # Reaches the curated pentest-tools MCP server during a black-box live
+      # engagement. Carries no traffic unless the blackbox-live profile is up.
+      - clawshell-mcp
     ports:
       # Bound to the LAN CIDR at the firewall layer (see firewall/nftables.conf);
       # Compose publishes on all interfaces, nftables restricts who can reach it.
@@ -114,7 +134,7 @@ services:
       # quota-guard — local inference needs no egress and no circuit breaker
       # (there is no external spend to protect). sandbox-dind is the nested
       # Docker control plane; localhost covers the Gateway's own services.
-      NO_PROXY: "local-llm,local-llm-amd,sandbox-dind,localhost,127.0.0.1"
+      NO_PROXY: "local-llm,local-llm-amd,sandbox-dind,pentest-tools-mcp,localhost,127.0.0.1"
       OPENCLAW_STATE_DIR: /home/node/.openclaw
       OPENCLAW_GATEWAY_TOKEN_FILE: /run/secrets/gateway_token
       # Model provider key delivered as a file; entrypoint/config maps it to
@@ -419,6 +439,99 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+
+  # --- Black-box live-testing: scoped target egress gateway ----------------
+  # ARMED ONLY for black-box live engagements (profile: blackbox-live). This is
+  # the second, completely separate egress lane. It shares NOTHING with
+  # quota-guard (which is the SaaS-cost guardrail for the AI-provider lane) --
+  # it only reuses the same mitmproxy *pattern*. It is the single container that
+  # can reach a black-box TARGET, and it enforces deny-by-default,
+  # in-scope-only, rate-limited, approval-gated egress on clawshell-target-uplink.
+  #
+  # Because egress is deny-by-default against the per-engagement scope file, any
+  # tool trying to phone home / report to an external service is structurally
+  # dropped (that host is not in scope). Nothing is published to the host.
+  target-gateway:
+    build: ../target-gateway
+    image: ${TARGET_GATEWAY_IMAGE:-clawshell/target-gateway:local}
+    container_name: clawshell-target-gateway
+    profiles: ["blackbox-live"]
+    restart: unless-stopped
+    networks:
+      - clawshell-target
+      - clawshell-target-uplink
+    # No `ports:`. The control API (8089) is loopback-only inside the container
+    # and is driven by pentest-task.sh / scripts/scope.sh via `docker exec`.
+    volumes:
+      - ../state/target-gateway:/state
+      - ../logs/target-gateway:/logs
+      # Per-engagement scope is staged here by the launcher (operator-provided,
+      # the agent cannot widen it). Read-only to the gateway.
+      - ../engagement/scope:/scope:ro
+    environment:
+      TARGET_RATE_DEFAULT: "${TARGET_RATE_DEFAULT:-5}"
+      TARGET_MAX_CONCURRENCY: "${TARGET_MAX_CONCURRENCY:-2}"
+      TARGET_RATE_SAFETY_FACTOR: "${TARGET_RATE_SAFETY_FACTOR:-0.8}"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 256m
+    cpus: "0.5"
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8089/status',timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+
+  # --- Black-box live-testing: curated pentest-tools MCP server ------------
+  # ARMED ONLY for black-box live engagements (profile: blackbox-live). Exposes
+  # a small set of SAFE-BY-DESIGN tools (Tier 0 passive HTTP primitives +
+  # fingerprinting) to the Gateway over clawshell-mcp. Every tool request is
+  # routed through target-gateway (clawshell-target) -- the MCP server has NO
+  # other network path out, so it cannot reach a target except through the
+  # scoped, rate-limited, approval-gated boundary.
+  pentest-tools-mcp:
+    build: ../pentest-tools-mcp
+    image: ${PENTEST_TOOLS_MCP_IMAGE:-clawshell/pentest-tools-mcp:local}
+    container_name: clawshell-pentest-tools-mcp
+    profiles: ["blackbox-live"]
+    restart: unless-stopped
+    depends_on:
+      target-gateway:
+        condition: service_healthy
+    networks:
+      - clawshell-mcp
+      - clawshell-target
+    environment:
+      TARGET_GATEWAY_PROXY: "http://target-gateway:8080"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 256m
+    cpus: "0.5"
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket;s=socket.create_connection(('127.0.0.1',8765),3);s.close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     logging:
       driver: json-file
       options:
