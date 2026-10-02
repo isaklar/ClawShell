@@ -23,6 +23,19 @@ os.environ["QUOTA_GUARD_ALLOWLIST_DIR"] = tmp
 os.environ["QUOTA_GUARD_STATIC_ALLOWLIST"] = os.path.join(tmp, "allowlist.conf")
 open(os.environ["QUOTA_GUARD_STATIC_ALLOWLIST"], "w").close()
 
+# The addon does `from mitmproxy import http, ctx` at import time. mitmproxy
+# is not needed to exercise the pure-Python repo-scope helpers under test and
+# is not installed in minimal/CI environments, so register a lightweight stub
+# before importing. `from __future__ import annotations` in the addon keeps
+# the http.* type hints unevaluated, so empty stub modules suffice.
+import types
+_mitm = types.ModuleType("mitmproxy")
+_mitm.http = types.ModuleType("mitmproxy.http")
+_mitm.ctx = types.ModuleType("mitmproxy.ctx")
+sys.modules.setdefault("mitmproxy", _mitm)
+sys.modules.setdefault("mitmproxy.http", _mitm.http)
+sys.modules.setdefault("mitmproxy.ctx", _mitm.ctx)
+
 sys.path.insert(0, "quota-guard/addons")
 import quota_guard_addon as qg
 
