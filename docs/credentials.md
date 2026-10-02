@@ -26,11 +26,12 @@ volume.
 
 ## 1. `MODEL_PROVIDER=local-gpu` (default, on-box GPU, no credentials)
 
-This is the headline mode. Inference runs **entirely on this machine** on the
-NVIDIA RTX 6000 Ada 96 GB GPU via the `local-llm` vLLM service, which exposes an
-OpenAI-compatible API on the internal `clawshell-inference` network. The
-engagement data, target code, requirement spec, findings, **never leaves the
-box** for a third-party provider.
+This is the headline mode. Inference runs **entirely on this machine** on a
+CUDA-capable NVIDIA GPU (for example an RTX 6000 Ada 96 GB) via the `local-llm`
+vLLM service, or an AMD Radeon card via the `local-llm-amd` service, which
+exposes an OpenAI-compatible API on the internal `clawshell-inference` network.
+The engagement data, target code, requirement spec, findings, **never leaves
+the box** for a third-party provider.
 
 - **No API key.** vLLM ignores the API key, but OpenClaw still requires a value
   to be present, so `config/openclaw.json5.example` uses a fixed dummy value
@@ -145,3 +146,21 @@ Whatever you choose, keep at most **one** external model-provider host active in
 `config/allowlist.conf`, resist allowlisting every provider "just in case";
 that widens the SSRF/exfiltration surface for no benefit. Under the default
 `local-gpu`, keep **zero** active (inference is on-box).
+
+---
+
+## See also
+
+* [Main README](../README.md): project overview and documentation map
+* [Quickstart](quickstart.md): install once, then the three ways to run a pentest
+* [Architecture](architecture.md): trust boundaries, decisions, the diagram
+* [GPU](gpu.md): on-box inference (NVIDIA/vLLM, AMD/ROCm), model/VRAM guidance
+* [Pentest team](pentest-team.md): the 4 agents, delegation, per-agent models
+* [Security](security.md): host hardening, credentials, full threat model
+* [Networking](networking.md): Docker topology, egress allowlist, nftables
+* [Black-box live testing](blackbox-live-testing.md): scoped egress, target-gateway, approval flow
+* [Quota protection](quota-protection.md): circuit breaker, per-task limits
+* [Caveman integration](caveman-integration.md): token-reduction skill and proxy
+* [Operations](operations.md): install/update/backup/restore/uninstall
+* [Testing](testing.md): the regression suite (static, unit, live, manual)
+* [Roadmap](roadmap.md): planned, not-yet-built work
