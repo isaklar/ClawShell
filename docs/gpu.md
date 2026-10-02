@@ -27,9 +27,10 @@ server differs. The sections below cover NVIDIA first, then the AMD backend.
 
 ## Target hardware
 
-Designed and tuned for a single **NVIDIA RTX 6000 Ada Generation, 96 GB
-VRAM**. Anything with comparable or larger VRAM works; smaller cards work too if
-you pick a smaller model and/or a shorter context (see
+Works with any CUDA-capable **NVIDIA** GPU; this guide was developed and tuned
+on one example card, an **RTX 6000 Ada Generation (96 GB VRAM)**. Anything with
+comparable or larger VRAM works; smaller cards work too if you pick a smaller
+model and/or a shorter context (see
 [Model & VRAM guidance](#model--vram-guidance)). For **AMD** cards see
 [AMD GPU (ROCm) backend](#amd-gpu-rocm-backend).
 
@@ -102,18 +103,20 @@ docker compose --env-file .env -f compose/compose.yml --profile local-gpu up -d 
 
 ## Model & VRAM guidance
 
-With **96 GB** of VRAM you have a lot of headroom:
+On a large card (for example one with **96 GB** of VRAM) you have a lot of
+headroom:
 
 - **Default, `Qwen/Qwen2.5-Coder-32B-Instruct`.** A strong code-analysis model
-  that fits comfortably at full precision, leaving plenty of room for a large
-  KV cache (long context over big codebases). A good default for pentest review.
+  that fits comfortably at full precision on such a card, leaving plenty of room
+  for a large KV cache (long context over big codebases). A good default for
+  pentest review.
 - **Larger / longer context.** You can raise `LOCAL_LLM_MAX_MODEL_LEN` (e.g.
   65536+) to fit bigger specs and more files in one pass, as long as VRAM holds.
   Model + KV-cache both consume VRAM; if load fails for OOM, lower
   `LOCAL_LLM_MAX_MODEL_LEN` first, then `LOCAL_LLM_GPU_MEM_UTIL`.
-- **Even bigger models.** 70B-class models or quantized larger models also fit
-  on 96 GB; set `LOCAL_LLM_MODEL` to its HF id. Match any model-specific vLLM
-  flags if required (edit the `command:` in `compose.yml`).
+- **Even bigger models.** With enough VRAM (roughly 80 GB+), 70B-class models or
+  quantized larger models also fit; set `LOCAL_LLM_MODEL` to its HF id. Match any
+  model-specific vLLM flags if required (edit the `command:` in `compose.yml`).
 - **Smaller cards.** On less VRAM, choose a smaller model (e.g. a 7B/14B coder)
   and reduce `LOCAL_LLM_MAX_MODEL_LEN`.
 
@@ -152,8 +155,9 @@ pass its healthcheck (hence the 300s `start_period`). Watch progress with
 
 ## AMD GPU (ROCm) backend
 
-Set `LOCAL_LLM_BACKEND=amd-rocm` to run on an **AMD Radeon** card (developed
-against an **RX 7900 XTX, 24 GB**). This swaps the vLLM `local-llm` service for
+Set `LOCAL_LLM_BACKEND=amd-rocm` to run on an **AMD Radeon** card (for example
+an **RX 7900 XTX, 24 GB**, which is what this backend was developed against).
+This swaps the vLLM `local-llm` service for
 the **`local-llm-amd`** service, which runs **Ollama's ROCm build** and serves
 models on the AMD GPU via ROCm/HIP, no CUDA, no NVIDIA Container Toolkit.
 
@@ -191,9 +195,9 @@ Ollama serves **quantized GGUF** by default, so pick a tag that fits 24 GB:
 | `qwen2.5-coder:14b` | ~9 GB | **Recommended default** for 24 GB, comfortable headroom for context |
 | `qwen2.5-coder:32b` | ~20 GB | Tight but usually fits; less room for long context |
 
-The 96 GB NVIDIA default (`Qwen/Qwen2.5-Coder-32B-Instruct` at full precision)
-will **not** fit 24 GB, use one of the quantized tags above. All 4 agents still
-share this one model (see `docs/pentest-team.md`).
+The full-precision default (`Qwen/Qwen2.5-Coder-32B-Instruct`, sized for a
+large card) will **not** fit 24 GB, use one of the quantized tags above. All 4
+agents still share this one model (see [pentest-team.md](pentest-team.md)).
 
 ### Enabling it
 
@@ -261,3 +265,21 @@ provide the relevant credential, and uncomment the matching host in
 `config/allowlist.conf`, full details in `docs/credentials.md`. In that mode
 neither GPU profile is started, so no model server runs and no GPU runtime
 (NVIDIA toolkit or ROCm) is required.
+
+---
+
+## See also
+
+* [Main README](../README.md): project overview and documentation map
+* [Quickstart](quickstart.md): install once, then the three ways to run a pentest
+* [Architecture](architecture.md): trust boundaries, decisions, the diagram
+* [Pentest team](pentest-team.md): the 4 agents, delegation, per-agent models
+* [Security](security.md): host hardening, credentials, full threat model
+* [Networking](networking.md): Docker topology, egress allowlist, nftables
+* [Black-box live testing](blackbox-live-testing.md): scoped egress, target-gateway, approval flow
+* [Quota protection](quota-protection.md): circuit breaker, per-task limits
+* [Caveman integration](caveman-integration.md): token-reduction skill and proxy
+* [Credentials](credentials.md): the model-provider decision
+* [Operations](operations.md): install/update/backup/restore/uninstall
+* [Testing](testing.md): the regression suite (static, unit, live, manual)
+* [Roadmap](roadmap.md): planned, not-yet-built work

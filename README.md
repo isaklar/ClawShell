@@ -1,316 +1,164 @@
 # clawshell
 
+```
+  ___                    ____ _
+ / _ \ _ __   ___ _ __  / ___| | __ ___      __
+| | | | '_ \ / _ \ '_ \| |   | |/ _` \ \ /\ / /
+| |_| | |_) |  __/ | | | |___| | (_| |\ V  V /
+ \___/| .__/ \___|_| |_|\____|_|\__,_| \_/\_/
+      |_|
+```
+
+[![CI](https://github.com/isaklar/ClawShell/actions/workflows/ci.yml/badge.svg)](https://github.com/isaklar/ClawShell/actions/workflows/ci.yml)
+
 A small, always-on, hard-sandboxed, **GPU-first code security analysis /
-penetration-testing platform**. Platform-independent; runs on any modern
-Linux host with Docker and systemd.
+penetration-testing platform**. It runs
+[OpenClaw](https://github.com/openclaw/openclaw) (MIT-licensed) in Docker on any
+modern Linux host with Docker and systemd.
 
-Runs [OpenClaw](https://github.com/openclaw/openclaw) (MIT-licensed, verified
-real upstream project) in Docker. **Inference runs on the box
-by default** (`MODEL_PROVIDER=local-gpu`): an on-box **NVIDIA** GPU serves the
-model through a local vLLM service, or an **AMD Radeon** card via Ollama/ROCm
-(`LOCAL_LLM_BACKEND=amd-rocm`), so the
-engagement data (the target code, the requirement
-spec, and the findings) **never leaves the machine** for a third-party
-provider. Pick a model that fits your card's VRAM; see `docs/gpu.md` for the
-backend setup and per-GPU model/VRAM guidance. It can **still run on any AI
-provider** (`github-copilot`/`anthropic`/`openai`/`custom`, see
-`docs/credentials.md`) by changing one variable, but local-GPU is the headline
-default.
+**Inference runs on the box by default** (`MODEL_PROVIDER=local-gpu`): an on-box
+**NVIDIA** GPU (via vLLM) or **AMD Radeon** card (via Ollama/ROCm) serves the
+model, so the engagement data (target code, requirement spec, findings) **never
+leaves the machine**. It can still run on any hosted provider
+(`github-copilot`/`anthropic`/`openai`/`custom`) by changing one variable. See
+[docs/gpu.md](docs/gpu.md) and [docs/credentials.md](docs/credentials.md).
 
-ClawShell is **read-only by default**, and its core scope is **static analysis
-of source code**, not live/dynamic testing of running systems (DAST). A team of
-four pentest agents analyzes a target against a requirement spec and **only
-reads** the target code; it never modifies, patches, "fixes", refactors,
-deletes, or runs destructive/exploit actions against it, and by default it never
-probes, scans, or sends requests to live hosts. If a spec only lists
-URLs/endpoints with no code, the team produces a spec/design-level assessment
-(and, when the operator explicitly arms **black-box live testing**, may perform
-scoped, rate-limited, approval-gated dynamic testing of the authorized targets.
-see `docs/blackbox-live-testing.md`). The target is mounted **read-only** (`:ro`)
-at `engagement/target/` so the filesystem itself rejects any write, and the
-**only** artifact any agent writes is a markdown findings report under
-`reports/` (remediation suggestions appear there as code snippets, never
-applied to the project). All of this is boxed in by a deny-by-default network
-layer and a quota/circuit breaker that makes it physically impossible for a
-runaway agent loop to burn unlimited AI spend (and, with local-GPU, unlimited
-GPU time).
+**Read-only by default.** A team of four pentest agents analyzes a target
+against a requirement spec and **only reads** the code: it never modifies,
+patches, refactors, deletes, or runs destructive/exploit actions, and by default
+never probes live hosts. The target is mounted read-only (`:ro`); the **only**
+artifact any agent writes is a markdown findings report under `reports/`
+(remediation ideas appear there as snippets, never applied). A black-box
+engagement may optionally be armed for **scoped, approval-gated live testing**
+(off by default; see [docs/blackbox-live-testing.md](docs/blackbox-live-testing.md)).
+Everything is fenced by a deny-by-default network layer and a quota/circuit
+breaker so a runaway agent loop cannot burn unlimited AI spend or GPU time.
 
-**Start here:** `docs/quickstart.md` to install and run your first pentest, or
-`docs/architecture.md` for the trust boundaries, network diagram, Docker
-security model, and the full reasoning behind every decision below.
+**Start here:** [docs/quickstart.md](docs/quickstart.md) to install and run your
+first pentest, or [docs/architecture.md](docs/architecture.md) for the trust
+boundaries, network diagram, and the reasoning behind every decision.
 
 ## What's in this repo
 
 ```
 clawshell/
-├── docs/                    architecture, security, networking, quota-protection, operations, credentials, gpu, pentest-team
-├── compose/compose.yml      the whole stack: OpenClaw Gateway, quota-guard, rootless sandbox DinD, local-llm GPU inference server
+├── docs/                    architecture, security, networking, quota-protection, operations, credentials, gpu, pentest-team, testing
+├── compose/compose.yml      the whole stack: OpenClaw Gateway, quota-guard, rootless sandbox DinD, local-llm GPU inference
 ├── quota-guard/             mitmproxy-based egress allowlist + AI-spend circuit breaker (Python)
-├── config/                  OpenClaw config template, agent-workspaces/ (4-agent PENTEST team role instructions), egress allowlist, per-host allowlist.d/
-├── firewall/                nftables ruleset template (rendered by install.sh)
-├── systemd/                 unit templates so the stack survives reboots
-├── scripts/                 install / uninstall / update / backup / restore / healthcheck / pentest-task / setup-team / quota-guard / allowlist
-├── github/PROVISIONING.md   how to mint the agent's GitHub credential (optional, only to clone private git targets)
-└── tests/                   isolation + circuit-breaker verification scripts
+├── target-gateway/          opt-in black-box live-testing egress boundary (scope, rate limit, approval gate)
+├── pentest-tools-mcp/       curated safe-by-design MCP toolset for live testing
+├── config/                  OpenClaw config template, agent-workspaces/ (4-agent team), egress allowlist
+├── firewall/ systemd/       nftables ruleset + unit templates (rendered by install.sh)
+├── scripts/                 install / update / backup / restore / healthcheck / pentest-task / scope / quota-guard / allowlist
+└── tests/                   static + unit suite, plus live isolation/circuit-breaker checks
 ```
 
 ## Quick start
 
-1. **(Optional) Mint the agent's GitHub credential**, only needed if you
-   point `--target` at a **private** GitHub repo to analyze. For local code
-   drops (`--target /path/to/code`) and local-GPU inference you need no GitHub
-   credentials at all. If you do need it, follow `github/PROVISIONING.md`
-   (fine-grained PAT or GitHub App, scoped read-only to the repos you want to
-   clone).
-2. Clone and configure:
-
-   ```bash
-   git clone <this-repo> clawshell
-   cd clawshell
-   cp .env.example .env
-   $EDITOR .env
-   ```
-
-   At minimum, set:
-   * `LAN_ALLOW_CIDR`, your actual LAN subnet (not `0.0.0.0/0`).
-   * `MODEL_PROVIDER=local-gpu` (the default) plus the GPU/model vars, `LOCAL_LLM_MODEL` (default `Qwen/Qwen2.5-Coder-32B-Instruct`),
-     `LOCAL_LLM_MAX_MODEL_LEN`, `LOCAL_LLM_GPU_MEM_UTIL`, and
-     (only for gated/private HF models) `HUGGING_FACE_HUB_TOKEN`. See
-     `docs/gpu.md`. To use a hosted provider instead, set `MODEL_PROVIDER` to
-     `github-copilot`/`anthropic`/`openai`/`custom` and the matching key, see `docs/credentials.md`.
-   * `GITHUB_AGENT_USERNAME` / `GITHUB_AGENT_TOKEN` / `GITHUB_ALLOWED_REPOS`, **optional**, only if you clone a private git target. When set,
-     `GITHUB_ALLOWED_REPOS` is **enforced**, not just informational:
-     `quota-guard` blocks clone/fetch calls to any GitHub repo not on this
-     list (see `docs/networking.md#github-repo-scope-enforcement`). Leave
-     empty if you only ever analyze local code drops.
-3. Install:
-
-   ```bash
-   sudo ./scripts/install.sh
-   ```
-
-With the default `MODEL_PROVIDER=local-gpu`, `install.sh` installs the NVIDIA
-Container Toolkit (if needed), starts the on-box `local-llm` vLLM service, and
-loads the model onto the GPU, no external auth, no device login. First start
-can take several minutes while weights download/load (watch with
-`docker compose -f compose/compose.yml --profile local-gpu logs -f local-llm`).
-If you switch to `MODEL_PROVIDER=github-copilot`, `install.sh` instead pauses
-with a one-time device-login command. See `docs/gpu.md` and
-`docs/credentials.md`.
-
-That's the whole install. `install.sh` is idempotent, re-running it only
-reconciles drift, never destroys existing state, and any genuinely destructive
-step requires `--confirm-reset`. See `docs/operations.md` for the exact
-14-phase breakdown of what it does.
-
-Afterwards:
-
 ```bash
+git clone <this-repo> clawshell && cd clawshell
+cp .env.example .env && $EDITOR .env      # set LAN_ALLOW_CIDR, MODEL_PROVIDER + GPU/model vars
+sudo ./scripts/install.sh                 # idempotent; stages the model onto the GPU
 ./scripts/healthcheck.sh
 ```
 
-```
-== Containers ==
-clawshell-openclaw-gateway    running
-clawshell-quota-guard         running
-clawshell-sandbox-dind        running
-clawshell-local-llm           running
-
-== Quota-guard ==
-Current task:        (none running)
-Quota state:          OK
-
-== Network ==
-Network:              HEALTHY (0 blocked connections in last hour)
-
-== GitHub ==
-GitHub:                NOT CONFIGURED (optional, local targets)
-```
+With the default `MODEL_PROVIDER=local-gpu` there is no external auth or device
+login; first start can take a few minutes while weights load. GitHub
+credentials are **optional**, only needed to clone a private git `--target`
+([github/PROVISIONING.md](github/PROVISIONING.md)). Full walkthrough, including
+the GPU driver step and hosted-provider alternatives:
+**[docs/quickstart.md](docs/quickstart.md)**.
 
 ## Running an engagement
 
-There are three ways to start an engagement; all run the analysis **inside
-OpenClaw**, the script and the API are just optional launchers on top of the
-same agents.
+Place the target code at `engagement/target/` and the spec at `engagement/spec/`
+(or attach it in chat), then start the analysis **inside OpenClaw** one of three
+ways:
 
-**1. Conversationally (primary).** Put the target code under test at
-`engagement/target/` (it is mounted read-only into the agents), open the
-OpenClaw Control UI, and talk to the **Lead Pentester**:
+1. **Conversationally (primary).** Talk to the **Lead Pentester** in the OpenClaw
+   Control UI: *"Run a read-only security analysis of `engagement/target/`
+   against this spec and write the report to `reports/report.md`."*
+2. **Headless / scriptable.** For CI or batch runs, wrapped in a quota-guarded
+   task with hard limits:
 
-> *Attach `requirements.md` in the chat →* "Run a read-only security analysis
-> of `engagement/target/` against this spec and write the report to
-> `reports/report.md`."
+   ```bash
+   ./scripts/pentest-task.sh --spec ./spec/requirements.md \
+     --target ./code-drops/acme-api --mode white-box \
+     --max-runtime 2h --max-ai-requests 100
+   ```
+3. **Over the LAN API.** The gateway exposes OpenAI-compatible endpoints on
+   port `18789` (bearer token, firewalled to `LAN_ALLOW_CIDR`); address the Lead
+   Pentester as model `openclaw/main`.
 
-The requirement spec can be **attached directly in the chat** (OpenClaw's
-Control UI supports PDF / Markdown / text document uploads) or dropped at
-`engagement/spec/`. No per-run script needed. If the spec does not state the
-engagement mode, the Lead Pentester will ask **black box or white box** before
-it starts (see below).
+An engagement goes to `main` (the Lead Pentester), which plans and delegates to
+**Recon**, **Exploit** (static reasoning, no live exploitation), and
+**Reporter**. Cancel a headless run with `./scripts/pentest-task.sh cancel
+<task-id>`. Full detail: **[docs/quickstart.md](docs/quickstart.md)** and
+**[docs/pentest-team.md](docs/pentest-team.md)**.
 
-**2. Headless / scriptable.** For CI or batch runs, use the launcher, which
-also wraps the run in a quota-guard task with hard limits:
+### Engagement modes
 
-```bash
-./scripts/pentest-task.sh \
-  --spec ./engagements/acme-api/requirements.md \
-  --target ./code-drops/acme-api \
-  --mode white-box \
-  --max-runtime 2h --max-ai-requests 100
-```
+The Lead Pentester fixes the mode **before** any analysis (from the spec, the
+`--mode` flag, or by asking you):
 
-`--spec` is the requirement spec (scope, rules of engagement, required report
-format); `--target` is a local path or a git URL; `--mode` is `white-box`
-(default) or `black-box` (see below). The launcher stages the spec
-at `engagement/spec/<file>` and the target at `engagement/target/` (host-side
-copy for local paths, host-side shallow `git clone` for URLs, the sandbox has
-no egress to clone), both mounted **read-only**, then runs the lead pentester
-and writes `reports/<task-id>.md`.
+* **White box (default):** full-knowledge review; everything under
+  `engagement/target/` is in scope unless the spec excludes it.
+* **Black box:** external-attacker viewpoint with **strict scope**, only the
+  assets the spec lists as in scope, even though the full source is present. With
+  no code (omit `--target`) it produces a spec/design-level assessment (threat
+  model + prioritized test plan, every item flagged as a hypothesis).
 
-**3. Over the LAN API.** The OpenClaw gateway exposes OpenAI-compatible
-endpoints on port `18789` (bearer token in `secrets/gateway_token`, firewalled
-to `LAN_ALLOW_CIDR`), so another machine on the network can drive an engagement.
-Place the target and spec under `engagement/` first, then target the Lead
-Pentester as the model `openclaw/main`:
+Both are read-only static analysis by default. A black-box engagement may
+additionally be armed for **scoped live testing** (`BLACKBOX_LIVE_TESTING=true`
+plus `--live --scope-file <scope.conf>`): a deny-by-default `target-gateway`
+forwards traffic **only** to spec-authorized hosts, agents reach them **only**
+through the curated `pentest-tools` MCP toolset, passive requests are
+rate-limited, and any state-changing action is **held for human approval**
+(`./scripts/scope.sh approve '<descriptor>'`). White box is always read-only.
+Full detail: **[docs/blackbox-live-testing.md](docs/blackbox-live-testing.md)**.
 
-```bash
-curl -s http://<host>:18789/v1/chat/completions \
-  -H "Authorization: Bearer <gateway-token>" \
-  -H 'Content-Type: application/json' \
-  -d '{ "model": "openclaw/main",
-        "messages": [{ "role": "user",
-          "content": "Analyze the code in engagement/target/ against the spec in engagement/spec/ and write your findings to reports/report.md. Read-only: do not modify the target." }] }'
-```
+## Safety model
 
-`GET /v1/models` lists the addressable agents (`openclaw/main`,
-`openclaw/recon`, …). Full walkthrough, getting the token, listing models, and
-calling it from another host, is in `docs/quickstart.md` (Way C).
+* **Security > agentic capability > quota protection > reproducibility > simple
+  deployment > maintainability > functionality.** Every trade-off in
+  [docs/architecture.md](docs/architecture.md) is made in that order: we'd rather
+  a task stop too early than burn your budget, and rather the agent lack access
+  than have more than it needs.
+* **Deny by default, everywhere.** Network egress, host filesystem access, Docker
+  socket access, and LAN reachability are all closed unless explicitly opened.
+  See [docs/security.md](docs/security.md) for the full threat model.
+* **No invented capabilities.** Where upstream tools lack a feature we needed, we
+  say so and build an honest alternative ([docs/credentials.md](docs/credentials.md),
+  [docs/quota-protection.md](docs/quota-protection.md)).
 
-By default an engagement goes to `main`, the **Lead Pentester** that reads
-the spec, plans the engagement, and delegates to three isolated specialists: **Recon** (`recon`, attack-surface mapping), **Exploit** (`exploit`,
-*vulnerability confirmation & impact analysis* by static reasoning, **no live
-exploitation**), and **Reporter** (`reporter`, writes the findings report).
+## Day-2 operations & testing
 
-### Black box vs white box
-
-Every engagement runs in one of two modes. The Lead Pentester fixes the mode
-**before** any analysis: it uses what the spec says, or the `--mode` flag on a
-headless run, and otherwise asks you in chat.
-
-* **White box (default): full-knowledge review.** The agents may use the entire
-  target, all source, config, and internal docs. Everything in `engagement/target/`
-  is in scope unless the spec explicitly excludes it.
-* **Black box: external-attacker perspective, strict scope.** The agents analyze
-  **only** the assets, endpoints, and interfaces the spec explicitly lists as in
-  scope and treat everything else as out of scope, even though the full source is
-  present. In this mode scope is a **hard boundary**: if the spec is ambiguous, or
-  a lead points at code that is not clearly in scope, the team stops and asks
-  rather than widening scope on its own. Black box does **not** require source:
-  if the spec ships only URLs/endpoints and no code (omit `--target`), the team
-  produces a spec/design-level assessment instead: a threat model, likely
-  weakness classes, and a prioritized test plan, with every item flagged as an
-  unvalidated hypothesis.
-
-Both modes are read-only static analysis by default; "black box" here means
-scope discipline and attacker viewpoint, not live/dynamic testing. A black-box
-engagement MAY additionally be armed for **scoped live testing** (see below);
-white box is always read-only. The active mode is recorded in the report's scope
-section.
-Pass `--agent recon|exploit|reporter` to target a specialist directly instead.
-See `docs/pentest-team.md` for the full team topology, delegation flow, and
-how to add/remove/reassign models per agent.
-
-This is **read-only by default**: the `engagement/` mount is `:ro`, so no agent
-can modify, patch, "fix", refactor, delete, or write to the target even if
-asked, the only writable output is the report under `reports/`. Cancel a
-running headless engagement with `./scripts/pentest-task.sh cancel <task-id>`.
-
-### Black-box live testing (opt-in, scoped)
-
-Some black-box engagements need real **dynamic** testing of a running target.
-ClawShell supports this, but it is **off by default** and tightly fenced:
-
-* It activates only when the operator sets `BLACKBOX_LIVE_TESTING=true` AND
-  launches `--mode black-box --live --scope-file <scope.conf>`. Everything else
-  stays read-only/air-gapped.
-* A dedicated, deny-by-default network boundary (`target-gateway`) forwards
-  traffic **only** to the spec-authorized hosts in the scope file. anything else
-  (including any tool trying to "phone home") is dropped. The agents cannot
-  widen scope; only you can edit the scope file.
-* The agents reach targets **only** through a curated, safe-by-design toolset
-  (the `pentest-tools` MCP server). Passive, idempotent requests are rate-limited
-  (honoring the spec's stated limit, or a gentle default); any state-changing or
-  potentially disruptive action is **held for human approval**
-  (`./scripts/scope.sh approve '<descriptor>'`).
-
-Full detail, risk tiers, and the approval flow: `docs/blackbox-live-testing.md`.
-
-The task is hard-capped on runtime and AI-request count (which, under
-local-GPU, also bound GPU time), and its status/stop reason is always
-recorded. Full detail: `docs/quota-protection.md`.
-
-## Why this looks the way it does
-
-* **Security > agentic capability > quota protection > reproducibility >
-  simple deployment > maintainability > functionality.** Every trade-off in
-  `docs/architecture.md` was made in that order. We'd rather a task stop too
-  early than a bug burn your AI budget for hours, and we'd rather the agent
-  be unable to do something than have more access than it needs.
-* **We didn't invent capabilities.** Where OpenClaw, GitHub, Docker, or Home
-  Assistant don't document a feature we needed (a native GitHub Copilot
-  provider, a per-task iteration counter), we say so explicitly and built an
-  honest alternative instead, see `docs/credentials.md` and
-  `docs/quota-protection.md`.
-* **Deny by default, everywhere.** Network egress, host filesystem access,
-  Docker socket access, LAN reachability, all closed unless explicitly
-  opened. See `docs/security.md` for the full threat model.
-
-## Day-2 operations
-
-| Task | Command |
-| --- | --- |
-| Update to a newer commit/image | `./scripts/update.sh` (auto rollback on failed healthcheck) |
-| Roll back manually | `./scripts/update.sh --rollback` |
-| Back up state/config | `./scripts/backup.sh` |
-| Restore | `./scripts/restore.sh backups/clawshell-<ts>.tar.zst` |
-| Uninstall | `./scripts/uninstall.sh [--purge]` |
-| Add an internal LAN service to the allowlist | `./scripts/allowlist.sh add <host:port>` |
-| Resume after quota exhaustion | `./scripts/quota-guard.sh resume` |
-
-Full detail for all of the above: `docs/operations.md`.
-
-## Testing / regression checks
-
-```bash
-./tests/run-all.sh
-```
-
-Runs the full suite: static/unit checks (script syntax, install.sh phase
-numbering, `.env.example` var coverage, allowlist consistency, secrets-hygiene,
-`docker compose config` validation, credential-provider decision logic) always
-run, no deployed host needed, safe on a dev laptop. Isolation/circuit-breaker
-tests that need a live deployment (`test-filesystem-isolation.sh`,
-`test-network-isolation.sh`, `test-quota-guard-circuit-breaker.sh`) run
-automatically too if they detect a running `clawshell-openclaw-gateway`
-container, otherwise they're reported as skipped. Run individual test files
-directly (e.g. `./tests/test-static-validation.sh`) for faster iteration.
+* **Operations** (update, rollback, backup, restore, uninstall, allowlist,
+  quota resume): quick-reference table and phase-by-phase detail in
+  **[docs/operations.md](docs/operations.md)**.
+* **Tests:** `./tests/run-all.sh` runs the static + Python unit suite anywhere
+  (no deployed host) and auto-runs live isolation/circuit-breaker checks if a
+  running gateway is detected. See **[docs/testing.md](docs/testing.md)**.
 
 ## Documentation map
 
-* `docs/quickstart.md`: the fast path: install once, then the three ways to run a pentest (chat, headless script, LAN API)
-* `docs/architecture.md`: trust boundaries, all 11 architecture decisions, the diagram
-* `docs/gpu.md`: on-box inference: NVIDIA/vLLM and AMD/ROCm backends, LOCAL_LLM_* vars, model/VRAM guidance, switching to a hosted provider
-* `docs/pentest-team.md`: the 4-agent pentest team (Lead Pentester + Recon/Exploit/Reporter), delegation, per-agent models, the read-only/report-only rules, sandboxing
-* `docs/security.md`: host hardening, credentials, full threat model
-* `docs/networking.md`: Docker network topology, egress allowlist, nftables/DOCKER-USER
-* `docs/blackbox-live-testing.md`: opt-in scoped live testing: the two egress lanes, target-gateway, the pentest-tools MCP toolset, risk tiers, rate limits, and the operator approval flow
-* `docs/quota-protection.md`: circuit breaker state machine, per-task limits, defaults
-* `docs/caveman-integration.md`: [caveman](https://github.com/JuliusBrussee/caveman) token-reduction skill (on by default) and experimental proxy (off by default)
-* `docs/credentials.md`: the model-provider decision (local-GPU by default; hosted providers optional)
-* `docs/operations.md`: install/update/backup/restore/uninstall phase-by-phase, rollback strategy, known limitations
-* `github/PROVISIONING.md`: GitHub bot credential setup (optional, only for private git targets)
-* `docs/roadmap.md`: planned, not-yet-built work (e.g. integrating OWASP Dependency-Check / CVE scanners)
+* [docs/quickstart.md](docs/quickstart.md): install once, then the three ways to run a pentest (chat, headless script, LAN API)
+* [docs/architecture.md](docs/architecture.md): trust boundaries, all architecture decisions, the diagram
+* [docs/gpu.md](docs/gpu.md): on-box inference (NVIDIA/vLLM, AMD/ROCm), LOCAL_LLM_* vars, model/VRAM guidance, switching to a hosted provider
+* [docs/pentest-team.md](docs/pentest-team.md): the 4-agent team (Lead + Recon/Exploit/Reporter), delegation, per-agent models, read-only/report-only rules
+* [docs/security.md](docs/security.md): host hardening, credentials, full threat model
+* [docs/networking.md](docs/networking.md): Docker network topology, egress allowlist, nftables/DOCKER-USER
+* [docs/blackbox-live-testing.md](docs/blackbox-live-testing.md): opt-in scoped live testing, the two egress lanes, target-gateway, the pentest-tools MCP toolset, risk tiers, approval flow
+* [docs/quota-protection.md](docs/quota-protection.md): circuit breaker state machine, per-task limits, defaults
+* [docs/caveman-integration.md](docs/caveman-integration.md): [caveman](https://github.com/JuliusBrussee/caveman) token-reduction skill and experimental proxy
+* [docs/credentials.md](docs/credentials.md): the model-provider decision (local-GPU by default; hosted providers optional)
+* [docs/operations.md](docs/operations.md): install/update/backup/restore/uninstall, rollback strategy, known limitations
+* [docs/testing.md](docs/testing.md): the regression suite (static, Python unit, live-host, manual)
+* [github/PROVISIONING.md](github/PROVISIONING.md): GitHub bot credential setup (optional, only for private git targets)
+* [docs/roadmap.md](docs/roadmap.md): planned, not-yet-built work
 
 ## License
 
-MIT, see `LICENSE`. OpenClaw is a separate MIT-licensed upstream project;
-this repo does not redistribute its source, only deploys its published images.
+MIT, see [LICENSE](LICENSE). OpenClaw is a separate MIT-licensed upstream
+project; this repo does not redistribute its source, only deploys its published
+images.

@@ -1,5 +1,19 @@
 # Operations
 
+## Day-2 quick reference
+
+| Task | Command |
+| --- | --- |
+| Update to a newer commit/image | `./scripts/update.sh` (auto rollback on failed healthcheck) |
+| Roll back manually | `./scripts/update.sh --rollback` |
+| Back up state/config | `./scripts/backup.sh` |
+| Restore | `./scripts/restore.sh backups/clawshell-<ts>.tar.zst` |
+| Uninstall | `./scripts/uninstall.sh [--purge]` |
+| Add an internal LAN service to the allowlist | `./scripts/allowlist.sh add <host:port>` |
+| Resume after quota exhaustion | `./scripts/quota-guard.sh resume` |
+
+Each of these is detailed below.
+
 ## Fresh install
 
 ```bash
@@ -164,3 +178,21 @@ written during `install.sh` step 5).
   attribution notes in `docs/quota-protection.md`.
 * GitHub Copilot as a direct model provider is not supported, see
   `docs/credentials.md`.
+
+---
+
+## See also
+
+* [Main README](../README.md): project overview and documentation map
+* [Quickstart](quickstart.md): install once, then the three ways to run a pentest
+* [Architecture](architecture.md): trust boundaries, decisions, the diagram
+* [GPU](gpu.md): on-box inference (NVIDIA/vLLM, AMD/ROCm), model/VRAM guidance
+* [Pentest team](pentest-team.md): the 4 agents, delegation, per-agent models
+* [Security](security.md): host hardening, credentials, full threat model
+* [Networking](networking.md): Docker topology, egress allowlist, nftables
+* [Black-box live testing](blackbox-live-testing.md): scoped egress, target-gateway, approval flow
+* [Quota protection](quota-protection.md): circuit breaker, per-task limits
+* [Caveman integration](caveman-integration.md): token-reduction skill and proxy
+* [Credentials](credentials.md): the model-provider decision
+* [Testing](testing.md): the regression suite (static, unit, live, manual)
+* [Roadmap](roadmap.md): planned, not-yet-built work

@@ -39,14 +39,15 @@ any agent writes is the markdown report under `reports/`; remediation
 suggestions live there as code snippets, never applied to the project.
 
 **The intelligence can be local or external.** By default
-(`MODEL_PROVIDER=local-gpu`) inference runs **entirely on this box** on an
-NVIDIA **RTX 6000 Ada 96 GB** GPU: the `local-llm` service serves an
-OpenAI-compatible API (vLLM) from a model kept on-box, over the internal
-`clawshell-inference` Docker network, so the engagement data (target code,
-spec, findings) never leaves the machine to a third-party provider, no API
-key, no model-provider egress. An **AMD Radeon** card works too
-(`LOCAL_LLM_BACKEND=amd-rocm`, served by Ollama/ROCm as `local-llm-amd`). It
-can **still** run on any hosted provider
+(`MODEL_PROVIDER=local-gpu`) inference runs **entirely on this box** on a
+CUDA-capable NVIDIA GPU (for example an **RTX 6000 Ada 96 GB**): the
+`local-llm` service serves an OpenAI-compatible API (vLLM) from a model kept
+on-box, over the internal `clawshell-inference` Docker network, so the
+engagement data (target code, spec, findings) never leaves the machine to a
+third-party provider, no API key, no model-provider egress. An **AMD Radeon**
+card works too (`LOCAL_LLM_BACKEND=amd-rocm`, served by Ollama/ROCm as
+`local-llm-amd`). Pick a model that fits your card's VRAM (see
+[gpu.md](gpu.md)). It can **still** run on any hosted provider
 (`github-copilot`/`anthropic`/`openai`/`custom`) by changing `MODEL_PROVIDER`;
 local-GPU is simply the default. See `docs/credentials.md` and `docs/gpu.md`.
 The host exists to give that model a **safe place to analyze**: read repos,
@@ -103,7 +104,7 @@ inference itself needs no egress and is not proxied through quota-guard.
 │  │  │  network)          │         other LAN hosts (default deny)   │ │
 │  │  └───────────────────┘                                            │ │
 │  │                                                                   │ │
-│  │  On-box GPU inference (default): local-llm (RTX 6000 Ada, vLLM)   │ │
+ │  │  On-box GPU inference (default): local-llm (e.g. NVIDIA GPU, vLLM)       │ │
 │  │  on the internal clawshell-inference network, NO internet route, │ │
 │  │  not proxied through quota-guard; engagement data stays on-box.    │ │
 │  │                                                                   │ │
@@ -324,3 +325,21 @@ blast radius of "the agent does something completely unexpected" is bounded to
 "one workspace holding a read-only copy of the target and a single markdown
 report, and a finite amount of AI/GPU time", never a write to the target,
 never the host, never the rest of the LAN.
+
+---
+
+## See also
+
+* [Main README](../README.md): project overview and documentation map
+* [Quickstart](quickstart.md): install once, then the three ways to run a pentest
+* [GPU](gpu.md): on-box inference (NVIDIA/vLLM, AMD/ROCm), model/VRAM guidance
+* [Pentest team](pentest-team.md): the 4 agents, delegation, per-agent models
+* [Security](security.md): host hardening, credentials, full threat model
+* [Networking](networking.md): Docker topology, egress allowlist, nftables
+* [Black-box live testing](blackbox-live-testing.md): scoped egress, target-gateway, approval flow
+* [Quota protection](quota-protection.md): circuit breaker, per-task limits
+* [Caveman integration](caveman-integration.md): token-reduction skill and proxy
+* [Credentials](credentials.md): the model-provider decision
+* [Operations](operations.md): install/update/backup/restore/uninstall
+* [Testing](testing.md): the regression suite (static, unit, live, manual)
+* [Roadmap](roadmap.md): planned, not-yet-built work

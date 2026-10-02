@@ -142,7 +142,7 @@ services:
       # config/openclaw.json5.example and docs/credentials.md).
       #
       # Default MODEL_PROVIDER=local-gpu: inference is served by the on-box
-      # local-llm service (RTX 6000 Ada), reachable at LOCAL_LLM_BASE_URL
+      # local-llm service (e.g. an NVIDIA GPU), reachable at LOCAL_LLM_BASE_URL
       # below. No API key, no egress. Switch to github-copilot/anthropic/
       # openai/custom in .env to use a hosted provider instead.
       MODEL_PROVIDER: "${MODEL_PROVIDER:-local-gpu}"
@@ -244,7 +244,7 @@ services:
     cap_drop:
       - ALL
 
-  # --- Local GPU inference server (RTX 6000 Ada 96 GB) --------------------
+  # --- Local GPU inference server (on-box NVIDIA GPU, e.g. RTX 6000 Ada) ---
   # The DEFAULT model backend for ClawShell (MODEL_PROVIDER=local-gpu). Serves
   # an OpenAI-compatible API from a model running entirely on the on-box GPU,
   # so engagement data (the target code, the requirement spec, findings) never
@@ -274,8 +274,8 @@ services:
       HF_HUB_OFFLINE: "${HF_HUB_OFFLINE:-0}"
       DO_NOT_TRACK: "1"
     # Model id/path + serving flags come from .env so you can swap models
-    # without editing compose. Defaults to a strong coding/analysis model that
-    # fits comfortably in 96 GB of VRAM.
+    # without editing compose. Defaults to a strong coding/analysis model;
+    # pick one that fits your card's VRAM (see docs/gpu.md).
     command: >
       --model ${LOCAL_LLM_MODEL:-Qwen/Qwen2.5-Coder-32B-Instruct}
       --served-model-name ${LOCAL_LLM_SERVED_NAME:-clawshell-local}
@@ -286,8 +286,8 @@ services:
     volumes:
       # Persistent weight cache so a restart doesn't re-download the model.
       - ../state/local-llm:/root/.cache/huggingface
-    # NVIDIA GPU reservation (RTX 6000 Ada). Requires the NVIDIA Container
-    # Toolkit + `nvidia` runtime on the host.
+    # NVIDIA GPU reservation (any CUDA-capable card, e.g. RTX 6000 Ada).
+    # Requires the NVIDIA Container Toolkit + `nvidia` runtime on the host.
     deploy:
       resources:
         reservations:
