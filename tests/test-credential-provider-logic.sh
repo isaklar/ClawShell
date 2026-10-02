@@ -37,9 +37,11 @@ else
   bad "github-copilot + no MODEL_PROVIDER_API_KEY should pass but failed: $(cat /tmp/check-out-last.$$)"
 fi
 
-# 2. github-copilot but GITHUB_AGENT_TOKEN still a placeholder → should FAIL
-#    (that var is unrelated to the model provider and always required).
-if run_check $'MODEL_PROVIDER=github-copilot\nGITHUB_AGENT_TOKEN=REPLACE_ME\n'; then
+# 2. github-copilot but GITHUB_AGENT_TOKEN still a placeholder while
+#    GITHUB_ALLOWED_REPOS is configured (agents expected to reach GitHub)
+#    → should FAIL. Without GITHUB_ALLOWED_REPOS the token is not required,
+#    so the scope var must be set for this placeholder check to trigger.
+if run_check $'MODEL_PROVIDER=github-copilot\nGITHUB_ALLOWED_REPOS=exampleorg/target-repo\nGITHUB_AGENT_TOKEN=REPLACE_ME\n'; then
   bad "github-copilot + placeholder GITHUB_AGENT_TOKEN should fail but passed"
 else
   ok "github-copilot + placeholder GITHUB_AGENT_TOKEN correctly fails"
