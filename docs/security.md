@@ -107,3 +107,21 @@ and `backup.sh` only ever report *presence*, not values.
 Run `./scripts/healthcheck.sh` regularly (or via the provided systemd timer)
 to see agent state, quota state, network health, and blocked-connection
 counts in one place.
+
+---
+
+## See also
+
+* [Main README](../README.md): project overview and documentation map
+* [Quickstart](quickstart.md): install once, then the three ways to run a pentest
+* [Architecture](architecture.md): trust boundaries, decisions, the diagram
+* [GPU](gpu.md): on-box inference (NVIDIA/vLLM, AMD/ROCm), model/VRAM guidance
+* [Pentest team](pentest-team.md): the 4 agents, delegation, per-agent models
+* [Networking](networking.md): Docker topology, egress allowlist, nftables
+* [Black-box live testing](blackbox-live-testing.md): scoped egress, target-gateway, approval flow
+* [Quota protection](quota-protection.md): circuit breaker, per-task limits
+* [Caveman integration](caveman-integration.md): token-reduction skill and proxy
+* [Credentials](credentials.md): the model-provider decision
+* [Operations](operations.md): install/update/backup/restore/uninstall
+* [Testing](testing.md): the regression suite (static, unit, live, manual)
+* [Roadmap](roadmap.md): planned, not-yet-built work

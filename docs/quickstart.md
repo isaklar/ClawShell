@@ -174,3 +174,21 @@ Read it under `workspaces/reports/`.
 More detail: `docs/gpu.md` (GPU/model), `docs/credentials.md` (secrets),
 `docs/pentest-team.md` (the agents), `docs/networking.md` (firewall/ports),
 `docs/architecture.md` (the full picture).
+
+---
+
+## See also
+
+* [Main README](../README.md): project overview and documentation map
+* [Architecture](architecture.md): trust boundaries, decisions, the diagram
+* [GPU](gpu.md): on-box inference (NVIDIA/vLLM, AMD/ROCm), model/VRAM guidance
+* [Pentest team](pentest-team.md): the 4 agents, delegation, per-agent models
+* [Security](security.md): host hardening, credentials, full threat model
+* [Networking](networking.md): Docker topology, egress allowlist, nftables
+* [Black-box live testing](blackbox-live-testing.md): scoped egress, target-gateway, approval flow
+* [Quota protection](quota-protection.md): circuit breaker, per-task limits
+* [Caveman integration](caveman-integration.md): token-reduction skill and proxy
+* [Credentials](credentials.md): the model-provider decision
+* [Operations](operations.md): install/update/backup/restore/uninstall
+* [Testing](testing.md): the regression suite (static, unit, live, manual)
+* [Roadmap](roadmap.md): planned, not-yet-built work
