@@ -9,6 +9,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 STATIC_TESTS=(
   tests/test-static-validation.sh
+  tests/test-install-packages.sh
   tests/test-credential-provider-logic.sh
   tests/test-github-repo-scope-logic.sh
   tests/test-blackbox-killswitch.sh

@@ -18,9 +18,6 @@ require_root
 # ---------------------------------------------------------------------------
 info "Phase 1/14: Preflight"
 # ---------------------------------------------------------------------------
-if ! command -v apt-get >/dev/null 2>&1; then
-  warn "This convenience installer targets the Debian/Ubuntu family (apt). On other Linux distributions, install Docker Engine + Compose, nftables, jq, and age with your package manager, then the platform itself runs unchanged (it only needs Docker + systemd)."
-fi
 if [[ "$(uname -m)" != "x86_64" ]]; then
   warn "Non-x86_64 architecture detected ($(uname -m)). Untested target."
 fi
@@ -34,23 +31,88 @@ info "Preflight OK. Detected SSH client IP: ${CURRENT_SSH_CLIENT_IP:-none (local
 # ---------------------------------------------------------------------------
 info "Phase 2/14: Packages"
 # ---------------------------------------------------------------------------
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -y
-apt-get install -y --no-install-recommends \
-  ca-certificates curl gnupg jq nftables unattended-upgrades age
-
-if ! command -v docker >/dev/null 2>&1; then
-  install -m 0755 -d /etc/apt/keyrings
+PACKAGE_MANAGER=manual
+ID=unknown
+ID_LIKE=
+if [[ -r /etc/os-release ]]; then
   . /etc/os-release
-  curl -fsSL "https://download.docker.com/linux/${ID:-ubuntu}/gpg" -o /etc/apt/keyrings/docker.asc
-  chmod a+r /etc/apt/keyrings/docker.asc
-  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/${ID:-ubuntu} ${VERSION_CODENAME} stable" \
-    > /etc/apt/sources.list.d/docker.list
-  apt-get update -y
-  apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-else
-  info "Docker already installed, skipping."
+  for distro in "${ID}" ${ID_LIKE:-}; do
+    case "${distro}" in
+      ubuntu|debian) PACKAGE_MANAGER=apt; DOCKER_DISTRO="${distro}"; break ;;
+      arch) PACKAGE_MANAGER=pacman; break ;;
+      fedora)
+        # Do not use Fedora's Docker repository on RHEL-like distributions.
+        if [[ "${ID}" == "fedora" ]]; then PACKAGE_MANAGER=dnf; break; fi
+        ;;
+    esac
+  done
 fi
+if [[ "${PACKAGE_MANAGER}" != "manual" ]]; then
+  package_command="${PACKAGE_MANAGER}"
+  [[ "${PACKAGE_MANAGER}" != "apt" ]] || package_command=apt-get
+  command -v "${package_command}" >/dev/null 2>&1 \
+    || die "Detected ${ID}, but ${package_command} is missing. Install the distribution's package manager before continuing."
+  info "Installing dependencies for ${ID} using ${package_command}."
+fi
+
+case "${PACKAGE_MANAGER}" in
+apt)
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -y
+  apt-get install -y --no-install-recommends \
+    ca-certificates curl gnupg jq nftables unattended-upgrades age openssl
+
+  if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
+    docker_codename="${UBUNTU_CODENAME:-${VERSION_CODENAME:-}}"
+    [[ -n "${docker_codename}" ]] \
+      || die "No Docker repository codename found for ${ID} in /etc/os-release."
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL "https://download.docker.com/linux/${DOCKER_DISTRO}/gpg" -o /etc/apt/keyrings/docker.asc
+    chmod a+r /etc/apt/keyrings/docker.asc
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/${DOCKER_DISTRO} ${docker_codename} stable" \
+      > /etc/apt/sources.list.d/docker.list
+    apt-get update -y
+    if ! command -v docker >/dev/null 2>&1; then
+      apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    else
+      apt-get install -y docker-compose-plugin
+    fi
+  else
+    info "Docker and Compose already installed, skipping."
+  fi
+  ;;
+pacman)
+  # Never refresh only the package database (-Sy): Arch forbids partial upgrades.
+  pacman -S --needed --noconfirm \
+    ca-certificates curl gnupg jq nftables age openssl docker docker-compose \
+    || die "Arch dependency installation failed. Update the host with 'pacman -Syu', resolve the package error above, then re-run install.sh."
+  ;;
+dnf)
+  dnf install -y ca-certificates curl gnupg2 jq nftables age openssl
+  if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
+    install -d -m 0755 /etc/yum.repos.d
+    curl -fsSL https://download.docker.com/linux/fedora/docker-ce.repo \
+      -o /etc/yum.repos.d/docker-ce.repo
+    if ! command -v docker >/dev/null 2>&1; then
+      dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    else
+      dnf install -y docker-compose-plugin
+    fi
+  else
+    info "Docker and Compose already installed, skipping."
+  fi
+  ;;
+manual)
+  warn "No automatic package installation for ${ID}. Using manually installed dependencies."
+  ;;
+esac
+
+for dependency in docker curl jq nft age openssl systemctl; do
+  command -v "${dependency}" >/dev/null 2>&1 \
+    || die "Missing dependency after package installation: ${dependency}. Install it with your distribution's package manager, then re-run install.sh."
+done
+docker compose version >/dev/null 2>&1 \
+  || die "Docker Compose plugin is missing or not working after package installation. Resolve the package error or install the plugin, then re-run install.sh."
 
 # --- GPU runtime for the on-box inference container (local-gpu only) --------
 # NVIDIA (default): install the NVIDIA Container Toolkit so Docker can expose
@@ -80,26 +142,46 @@ if [[ "${MODEL_PROVIDER:-local-gpu}" == "local-gpu" ]]; then
   if [[ "${LOCAL_LLM_BACKEND:-nvidia}" == "nvidia" ]]; then
     if ! command -v nvidia-ctk >/dev/null 2>&1; then
       info "Installing NVIDIA Container Toolkit (for GPU inference)..."
-      curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
-        | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
-      curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
-        | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
-        > /etc/apt/sources.list.d/nvidia-container-toolkit.list
-      apt-get update -y
-      apt-get install -y nvidia-container-toolkit
-      nvidia-ctk runtime configure --runtime=docker
-      systemctl restart docker || true
-      info "NVIDIA Container Toolkit installed and Docker runtime configured."
+      case "${PACKAGE_MANAGER}" in
+        apt)
+          curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
+            | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+          curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
+            | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
+            > /etc/apt/sources.list.d/nvidia-container-toolkit.list
+          apt-get update -y
+          apt-get install -y nvidia-container-toolkit
+          ;;
+        pacman)
+          pacman -S --needed --noconfirm nvidia-container-toolkit \
+            || die "NVIDIA Container Toolkit installation failed. Update the Arch host with 'pacman -Syu', resolve the package error above, then re-run install.sh."
+          ;;
+        dnf)
+          curl -fsSL https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo \
+            -o /etc/yum.repos.d/nvidia-container-toolkit.repo
+          dnf install -y nvidia-container-toolkit
+          ;;
+        manual)
+          die "NVIDIA Container Toolkit (nvidia-ctk) is missing. Install it with your distribution's tools, then re-run install.sh (see docs/gpu.md)."
+          ;;
+      esac
     else
-      info "NVIDIA Container Toolkit already present, skipping."
+      info "NVIDIA Container Toolkit already present, skipping installation."
     fi
+    nvidia-ctk runtime configure --runtime=docker
+    systemctl restart docker
+    info "NVIDIA Container Toolkit present and Docker runtime configured."
   fi
 fi
 
 if [[ "${ENABLE_UNATTENDED_UPGRADES:-true}" == "true" ]]; then
-  echo 'Unattended-Upgrade::Automatic-Reboot "'"${UNATTENDED_UPGRADES_AUTO_REBOOT:-false}"'";' \
-    > /etc/apt/apt.conf.d/52clawshell-auto-reboot
-  systemctl enable --now unattended-upgrades.service
+  if [[ "${PACKAGE_MANAGER}" == "apt" ]]; then
+    echo 'Unattended-Upgrade::Automatic-Reboot "'"${UNATTENDED_UPGRADES_AUTO_REBOOT:-false}"'";' \
+      > /etc/apt/apt.conf.d/52clawshell-auto-reboot
+    systemctl enable --now unattended-upgrades.service
+  else
+    warn "Skipping apt-specific unattended-upgrades. Configure automatic security updates with your distribution's tools."
+  fi
 fi
 
 # ---------------------------------------------------------------------------
