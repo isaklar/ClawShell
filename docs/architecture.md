@@ -213,7 +213,12 @@ mounted into any container.
   other LAN hosts. This is the best available trade-off: OpenClaw's sandbox
   backend requires *some* Docker control plane; rootless DinD isolates it from
   the host socket at the cost of one extra hop of virtualization overhead.
-* Every container: `user: <non-root uid>`, `read_only: true` root filesystem
+  Trade-off: the upstream rootless DinD image must run with
+  `privileged: true` (it does not start under `no-new-privileges` / default
+  seccomp). The inner daemon still runs as uid 1000 with no host socket and
+  no network route out, but root inside that one container would have an
+  easier path to the host than elsewhere (see `docs/security.md`).
+* Every other container: `user: <non-root uid>`, `read_only: true` root filesystem
   with explicit `tmpfs`/volume exceptions, `security_opt: [no-new-privileges,
   seccomp=default]`, `cap_drop: [ALL]` with only the specific caps added back
   if strictly required (documented per-service in `compose/compose.yml`),

@@ -1,0 +1,18 @@
+[Unit]
+Description=clawshell host firewall (nftables table inet clawshell)
+Documentation=file:///etc/clawshell/nftables.conf
+Wants=network-pre.target
+Before=network-pre.target docker.service
+# Load after the distribution's nftables.service: its config may start with
+# `flush ruleset`, which would otherwise remove this table again.
+After=nftables.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/clawshell/nftables.conf
+ExecReload=/usr/sbin/nft -f /etc/clawshell/nftables.conf
+ExecStop=-/usr/sbin/nft delete table inet clawshell
+
+[Install]
+WantedBy=multi-user.target

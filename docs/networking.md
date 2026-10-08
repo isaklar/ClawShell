@@ -215,12 +215,26 @@ literal IP/host:port you configured, not a wildcard range).
 
 ## Host firewall (nftables)
 
-See `firewall/nftables.conf` for the literal ruleset applied by
-`install.sh`. Summary:
+See `firewall/nftables.conf.template` for the literal ruleset applied by
+`install.sh`. It lives in its **own** table, `inet clawshell`, and never runs
+`flush ruleset`: your distro firewall (firewalld/ufw/`/etc/nftables.conf`) and
+Docker's own rules are left untouched. It is loaded at boot by
+`clawshell-firewall.service` from `/etc/clawshell/nftables.conf`, before
+Docker starts. Summary:
 
-* Default policy: `drop` on `input` and `forward`; `accept` on `output`
-  (the host itself is trusted; containers are constrained by Docker network
-  membership + quota-guard instead of host `output` rules).
+* `input` policy is `FIREWALL_INPUT_POLICY` from `.env`: `drop` (default,
+  dedicated appliance) or `accept` (desktop/workstation: only the SSH and
+  Gateway ports below are filtered; everything else on the host keeps working).
+  Note a `drop` in any nftables base chain is final, so with `drop` other
+  services on the host are blocked even if another firewall allows them.
+* `forward` policy is `accept`, so container egress, Docker's own NAT and
+  other software (VMs, libvirt) are unaffected; the chain only drops **new
+  DNAT'ed connections from outside `LAN_ALLOW_CIDR`/`LAN_ALLOW_CIDR6`**, i.e.
+  published container ports. With `userland-proxy: false` those never pass
+  through `input`, which is why this filter lives in `forward` (no
+  `DOCKER-USER` chain is used).
+* `output` is untouched (the host itself is trusted; containers are
+  constrained by Docker network membership + quota-guard).
 * `ct state established,related accept`
 * `iifname lo accept`
 * `icmp`/`icmpv6` rate-limited accept (ping, PMTUD)
@@ -229,17 +243,17 @@ See `firewall/nftables.conf` for the literal ruleset applied by
   `.env: SSH_ALLOW_CIDR` if you prefer
 - Control UI port (`.env: OPENCLAW_GATEWAY_PORT`, default 18789) accept only
   from `.env: LAN_ALLOW_CIDR` (defaults to RFC1918 `192.168.0.0/16`, set this
-  to your actual /24 for tighter scope)
-* A `DOCKER-USER`-equivalent nftables chain is installed and referenced so
-  that Docker's own NAT/forwarding rules cannot silently reopen ports beyond
-  what's declared in `compose/compose.yml`'s `ports:`, see the file for the
-  exact chain wiring, based on the pattern documented in OpenClaw's own
-  network-exposure guide for Docker + UFW/nftables interaction.
+  to your actual /24 for tighter scope) and `LAN_ALLOW_CIDR6` (default `::1/128`,
+  i.e. no IPv6 LAN access).
+* DHCPv6 replies (link-local, udp/546) are accepted so IPv6 addressing keeps
+  working under `drop`.
 
-`install.sh` prints the exact ruleset it's about to apply and requires
-confirmation before the first `nft -f` load; it also keeps your existing SSH
-session's source IP allowed for the duration of the install so you cannot
-lock yourself out mid-run.
+`install.sh` prints the exact ruleset it's about to apply, validates it with
+`nft -c`, and requires confirmation before loading it atomically with `nft -f`
+(either the whole table loads or nothing changes). Remove it at any time with
+`sudo nft delete table inet clawshell` (or `systemctl stop clawshell-firewall`).
+Older installs that overwrote `/etc/nftables.conf` are migrated back to your
+pre-install file on the next `install.sh` run.
 
 ## Exposing the Control UI outside your LAN
 

@@ -47,14 +47,17 @@ sudo ./scripts/install.sh
 3. **System user + directories**, creates the `clawshell` system user
    (no login shell, no password) and `/opt/clawshell/{secrets,state,
    workspaces,logs,backups}` with correct ownership/permissions.
-4. **Docker hardening**, writes `/etc/docker/daemon.json` (log rotation
-   limits, default address pools) if not already customized; enables and
-   starts the Docker service.
-5. **Firewall**, renders `firewall/nftables.conf` from your `.env`
-   (`SSH_PORT`, `LAN_ALLOW_CIDR`, `OPENCLAW_GATEWAY_PORT`), prints a diff
-   against the running ruleset, asks for confirmation, then loads it via
-   `nft -f`. Keeps a rollback copy and reverts automatically if the new
-   ruleset would drop the SSH session that's running the installer.
+4. **Docker hardening**, merges its defaults (log rotation, `userland-proxy: false`) into `/etc/docker/daemon.json`, keeping any
+   existing values (e.g. the NVIDIA runtime from `nvidia-ctk`), backs up the
+   old file and restarts Docker only if something changed.
+5. **Firewall**, renders `firewall/nftables.conf.template` from your `.env`
+   (`SSH_PORT`, `SSH_ALLOW_CIDR`, `LAN_ALLOW_CIDR`, `LAN_ALLOW_CIDR6`,
+   `OPENCLAW_GATEWAY_PORT`, `FIREWALL_INPUT_POLICY`) into its own
+   `inet clawshell` table, prints it, asks for confirmation, checks it with
+   `nft -c` and loads it atomically with `nft -f`. Saved to
+   `/etc/clawshell/nftables.conf` and loaded at boot by
+   `clawshell-firewall.service`; `/etc/nftables.conf` and your other firewall
+   rules are not touched. Use `FIREWALL_INPUT_POLICY=accept` on a desktop.
 6. **Secrets**, writes provided `.env` values into
    `/opt/clawshell/secrets/` as individual `600` files consumed by Compose
    `secrets:` (never as plaintext env in `docker inspect` output where
@@ -175,9 +178,8 @@ automatically at the end.
 Stops and removes containers/networks/images created by this repo, removes
 the systemd units, and, only with `--purge`, removes
 `/opt/clawshell` entirely (prompts for confirmation, offers to run
-`backup.sh` first). Never touches the nftables ruleset beyond removing the
-rules this repo added (keeps a pre-install snapshot for exact restoration,
-written during `install.sh` step 5).
+`backup.sh` first). Firewall: disables `clawshell-firewall.service` and
+deletes only the `inet clawshell` table; other nftables rules are untouched.
 
 ## Known limitations / follow-ups
 

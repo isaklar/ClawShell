@@ -21,13 +21,14 @@ of the OpenClaw Gateway process.
   `PermitRootLogin prohibit-password` are set, it will not disable password
   auth if it cannot first confirm a working key-based login path, to avoid
   locking you out. It never touches your existing `authorized_keys`.
-* **Firewall**: nftables, default-deny inbound. Allowed: SSH (rate-limited,
-  22/tcp by default, change via `.env`), OpenClaw Control UI port
-  (18789/tcp by default) restricted to your configured LAN CIDR, and
-  established/related. Nothing else inbound. See `docs/networking.md` for the
-  full ruleset and the `DOCKER-USER` chain interaction (Docker rewrites
-  iptables/nftables in ways that bypass naive `INPUT` rules for published
-  container ports, this repo's firewall config accounts for that).
+* **Firewall**: nftables, in its own `inet clawshell` table (never flushes
+  your other rules). With `FIREWALL_INPUT_POLICY=drop` (default) it is
+  default-deny inbound: allowed are SSH (rate-limited, 22/tcp by default,
+  change via `.env`), the OpenClaw Control UI port (18789/tcp by default)
+  restricted to your configured LAN CIDR, and established/related. With
+  `accept` (desktops) only SSH and the Control UI port are filtered. Published
+  container ports are DNAT'ed and bypass `input`, so a `forward` rule drops new
+  DNAT'ed connections from outside the LAN CIDR. See `docs/networking.md`.
 * **Unattended upgrades**: on Ubuntu/Debian, `unattended-upgrades` is installed and configured for
   security updates only, with automatic reboot disabled by default (you
   reboot on your own schedule; a silently-rebooted always-on box is its own
@@ -43,7 +44,24 @@ of the OpenClaw Gateway process.
   its own `user:`, drops all capabilities, and disables `no-new-privileges`
   escapes. This is documented as an explicit trade-off, not an oversight.
   Docker's default `docker-default` seccomp and AppArmor profiles are left
-  enabled (not disabled anywhere in this repo).
+  enabled everywhere **except `sandbox-dind`**, see below. `install.sh`
+  merges its log-rotation/`userland-proxy` defaults into
+  an existing `/etc/docker/daemon.json` (e.g. one written by
+  `nvidia-ctk`) without overriding your values.
+* **`sandbox-dind` runs `privileged: true`** (residual risk, accepted). The
+  upstream `docker:*-dind-rootless` image cannot start otherwise (it needs
+  setuid `newuidmap`, user namespaces and mounts). The inner Docker daemon
+  still runs as an unprivileged user (uid 1000), it gets no host Docker
+  socket, it sits only on the internal `clawshell-sandbox` network (no
+  internet/LAN route), and it keeps its memory/CPU/pids limits. But a process
+  that becomes root inside this container has a much easier path to the host
+  than in any other ClawShell container. Do not mount anything else into it
+  and keep the image pinned and updated.
+* **Egress TLS interception**: quota-guard (mitmproxy) terminates TLS to
+  enforce the allowlist. Only its **public** CA certificate is published
+  (`state/quota-guard/public-ca/`) and mounted read-only into the Gateway, CLI
+  and caveman-proxy (`NODE_EXTRA_CA_CERTS`, `GIT_SSL_CAINFO`,
+  `SSL_CERT_FILE`). The CA private key never leaves `state/quota-guard/mitmproxy/`.
 * **Log rotation**: Docker's `json-file` log driver configured with
   `max-size`/`max-file` in `compose/compose.yml`; host `logrotate` drop-in
   for `/opt/clawshell/logs/`.

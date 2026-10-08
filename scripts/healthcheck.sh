@@ -71,9 +71,12 @@ printf 'Network:              HEALTHY (%s blocked connections in last hour)\n' "
 section "GitHub"
 if docker exec clawshell-openclaw-gateway sh -c 'test -s /run/secrets/github_agent_token' 2>/dev/null; then
   printf 'GitHub:                HEALTHY (token present)\n'
-else
-  printf 'GitHub:                DEGRADED (token missing)\n'
+elif [[ -n "${GITHUB_ALLOWED_REPOS:-}" ]]; then
+  printf 'GitHub:                DEGRADED (token missing but GITHUB_ALLOWED_REPOS is set)\n'
   EXIT_CODE=1
+else
+  # Optional: only needed to clone private git targets (github/PROVISIONING.md).
+  printf 'GitHub:                NOT CONFIGURED (optional, local code drops only)\n'
 fi
 
 section "Disk usage"

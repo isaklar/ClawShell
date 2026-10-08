@@ -26,14 +26,32 @@ confirm "Apply this restore? Current state/config will be overwritten." || { inf
 info "Stopping services..."
 compose down
 
-rsync -a --delete "${WORKDIR}/state/" /opt/clawshell/state/
-rsync -a --delete "${WORKDIR}/config/" config/
+# Per-subdir so state the backup doesn't contain (model caches, sandbox-dind)
+# is left alone instead of being --delete'd.
+for src in "${WORKDIR}"/state/*/; do
+  [[ -d "${src}" ]] || continue
+  rsync -a --delete "${src}" "/opt/clawshell/state/$(basename "${src}")/"
+done
+# Older backups carry the live OpenClaw config as config/openclaw.json5; it now
+# lives in state/openclaw-config (config/openclaw.json5 is a symlink to it).
+if [[ -f "${WORKDIR}/config/openclaw.json5" ]]; then
+  install -d -m 0755 /opt/clawshell/state/openclaw-config
+  install -m 0644 "${WORKDIR}/config/openclaw.json5" /opt/clawshell/state/openclaw-config/openclaw.json5
+fi
+# Only restore what backup.sh saves; never --delete the repo's tracked files.
+[[ -f "${WORKDIR}/config/allowlist.conf" ]] && cp -a "${WORKDIR}/config/allowlist.conf" config/allowlist.conf
+[[ -d "${WORKDIR}/config/allowlist.d" ]] && rsync -a --delete "${WORKDIR}/config/allowlist.d/" config/allowlist.d/
+ln -sfn /opt/clawshell/state/openclaw-config/openclaw.json5 config/openclaw.json5
 
 if [[ -d "${WORKDIR}/workspaces" ]]; then
   rsync -a "${WORKDIR}/workspaces/" /opt/clawshell/workspaces/
 fi
 
-chown -R clawshell:clawshell /opt/clawshell/state
+for d in openclaw openclaw-config caveman; do
+  [[ -d "/opt/clawshell/state/${d}" ]] && chown -R clawshell:clawshell "/opt/clawshell/state/${d}"
+done
+# Fixed in-image UIDs, see install.sh Phase 3.
+chown -R 10001:10001 /opt/clawshell/state/quota-guard 2>/dev/null || true
 
 info "Starting services..."
 compose up -d

@@ -169,8 +169,8 @@
   // OpenAI-compatible API; the `local` provider below points at it via the
   // Gateway's LOCAL_LLM_BASE_URL env var. No API key leaves the box. After
   // install, select it with:
-  //   docker compose -f compose/compose.yml exec openclaw-gateway \
-  //     openclaw models set local/clawshell-local
+  //   docker compose -f compose/compose.yml run --rm openclaw-cli \
+  //     models set local/clawshell-local
   //
   // MODEL_PROVIDER=custom works the same way for any OTHER OpenAI-compatible
   // endpoint (remote or another local server) via MODEL_PROVIDER_BASE_URL.
@@ -181,8 +181,8 @@
   // local-llm-amd Ollama container instead. OpenClaw's NATIVE `ollama`
   // provider (below) talks to Ollama's /api/chat — do NOT point it at the
   // OpenAI-compatible /v1 path, which breaks tool calling. Select it with:
-  //   docker compose -f compose/compose.yml exec openclaw-gateway \
-  //     openclaw models set ollama/qwen2.5-coder:14b
+  //   docker compose -f compose/compose.yml run --rm openclaw-cli \
+  //     models set ollama/qwen2.5-coder:14b
   // See docs/gpu.md for VRAM-appropriate model tags (24 GB cards etc.).
   models: {
     providers: {

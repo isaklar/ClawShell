@@ -72,10 +72,10 @@ services:
     # this file); it talks to the Gateway only via clawshell-egress (internal,
     # no route out). This is what makes it the sole egress choke point.
     volumes:
-      - ../state/quota-guard:/state
-      - ../logs/quota-guard:/logs
-      - ../config/allowlist.d:/allowlist.d:ro
-      - ../config/allowlist.conf:/config/allowlist.conf:ro
+      - ../state/quota-guard:/state:z
+      - ../logs/quota-guard:/logs:z
+      - ../config/allowlist.d:/allowlist.d:ro,z
+      - ../config/allowlist.conf:/config/allowlist.conf:ro,z
     environment:
       MAX_ITERATIONS_PER_TASK: "${MAX_ITERATIONS_PER_TASK:-50}"
       MAX_AI_REQUESTS_PER_TASK: "${MAX_AI_REQUESTS_PER_TASK:-100}"
@@ -99,10 +99,13 @@ services:
     cpus: "0.5"
     pids_limit: 128
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8088/status',timeout=3)"]
+      # Healthy only once the control API answers AND the egress CA cert has
+      # been published for the clients (see quota-guard/entrypoint.sh).
+      test: ["CMD", "python3", "-c", "import os,urllib.request;urllib.request.urlopen('http://127.0.0.1:8088/status',timeout=3);assert os.path.getsize('/state/public-ca/clawshell-egress-ca.pem')>0"]
       interval: 30s
       timeout: 5s
       retries: 3
+      start_period: 30s
 
   openclaw-gateway:
     image: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:2026.9.4}
@@ -135,7 +138,17 @@ services:
       # (there is no external spend to protect). sandbox-dind is the nested
       # Docker control plane; localhost covers the Gateway's own services.
       NO_PROXY: "local-llm,local-llm-amd,sandbox-dind,pentest-tools-mcp,localhost,127.0.0.1"
+      # quota-guard intercepts TLS; trust its public CA (published by
+      # quota-guard/entrypoint.sh) in Node/npm and git.
+      NODE_EXTRA_CA_CERTS: /etc/clawshell-ca/clawshell-egress-ca.pem
+      GIT_SSL_CAINFO: /etc/clawshell-ca/clawshell-egress-ca.pem
       OPENCLAW_STATE_DIR: /home/node/.openclaw
+      # Live config lives in its own dir (a directory mount, so `openclaw-cli`
+      # edits are visible here). Read-only for the Gateway itself: the agent
+      # cannot rewrite its own config. Change it via openclaw-cli, then
+      # restart the Gateway (see docs/operations.md).
+      OPENCLAW_CONFIG_PATH: /home/node/.openclaw-config/openclaw.json5
+      OPENCLAW_CONFIG_READONLY: "1"
       OPENCLAW_GATEWAY_TOKEN_FILE: /run/secrets/gateway_token
       # Model provider key delivered as a file; entrypoint/config maps it to
       # the correct env var for the provider chosen in .env (see
@@ -170,15 +183,16 @@ services:
       - model_provider_api_key
       - github_agent_token
     volumes:
-      - ../state/openclaw:/home/node/.openclaw
-      - ../workspaces:/home/node/workspace
+      - ../state/openclaw:/home/node/.openclaw:z
+      - ../state/openclaw-config:/home/node/.openclaw-config:ro,z
+      - ../state/quota-guard/public-ca:/etc/clawshell-ca:ro,z
+      - ../workspaces:/home/node/workspace:z
       # Engagement inputs are mounted READ-ONLY: the agents may analyze the
       # target code and spec but can never modify them. The only writable
       # output is the report under /home/node/workspace/reports/ (see
       # docs/pentest-team.md). Staged into ./engagement by scripts/pentest-task.sh
       # or placed there manually before an interactive run.
-      - ../engagement:/home/node/workspace/engagement:ro
-      - ../config/openclaw.json5:/home/node/.openclaw/openclaw.json5:ro
+      - ../engagement:/home/node/workspace/engagement:ro,z
     user: "${AGENT_UID:-1000}:${AGENT_GID:-1000}"
     read_only: true
     tmpfs:
@@ -200,23 +214,24 @@ services:
   # own per-session sandbox containers (agents.defaults.sandbox: docker
   # backend). This is deliberately NOT the host's /var/run/docker.sock — see
   # docs/architecture.md §6 for the trade-off analysis.
+  #
+  # privileged: true is REQUIRED by the upstream docker:*-dind-rootless image
+  # (it needs setuid newuidmap/newgidmap, user namespaces and mounts; it will
+  # not start under no-new-privileges / default seccomp). The inner daemon
+  # still runs as the unprivileged `rootless` user (uid 1000), has no host
+  # Docker socket, and sits on clawshell-sandbox (internal: no internet/LAN
+  # route). See docs/security.md for the residual risk.
   sandbox-dind:
     image: docker:27-dind-rootless
     container_name: clawshell-sandbox-dind
     restart: unless-stopped
-    privileged: false
+    privileged: true
     networks:
       - clawshell-sandbox
     environment:
       DOCKER_TLS_CERTDIR: ""
     volumes:
-      - ../state/sandbox-dind:/home/rootless/.local/share/docker
-    security_opt:
-      - no-new-privileges:true
-      - seccomp=unconfined  # required by rootless dind's own nested runtime; the
-                              # outer container still has no host socket and no
-                              # route to the internet or your LAN (clawshell-sandbox
-                              # is `internal: true`)
+      - ../state/sandbox-dind:/home/rootless/.local/share/docker:z
     mem_limit: 4g
     cpus: "2.0"
     pids_limit: 1024
@@ -231,10 +246,20 @@ services:
       HTTP_PROXY: "http://quota-guard:8080"
       HTTPS_PROXY: "http://quota-guard:8080"
       NO_PROXY: "local-llm,local-llm-amd,sandbox-dind,localhost,127.0.0.1"
+      # quota-guard intercepts TLS; trust its public CA (published by
+      # quota-guard/entrypoint.sh) in Node/npm and git.
+      NODE_EXTRA_CA_CERTS: /etc/clawshell-ca/clawshell-egress-ca.pem
+      GIT_SSL_CAINFO: /etc/clawshell-ca/clawshell-egress-ca.pem
+      OPENCLAW_STATE_DIR: /home/node/.openclaw
+      # Same live config as the Gateway, but WRITABLE here so operator
+      # commands like `models set` / `plugins install` can persist changes.
+      OPENCLAW_CONFIG_PATH: /home/node/.openclaw-config/openclaw.json5
     volumes:
-      - ../state/openclaw:/home/node/.openclaw
-      - ../workspaces:/home/node/workspace
-      - ../engagement:/home/node/workspace/engagement:ro
+      - ../state/openclaw:/home/node/.openclaw:z
+      - ../state/openclaw-config:/home/node/.openclaw-config:z
+      - ../state/quota-guard/public-ca:/etc/clawshell-ca:ro,z
+      - ../workspaces:/home/node/workspace:z
+      - ../engagement:/home/node/workspace/engagement:ro,z
     user: "${AGENT_UID:-1000}:${AGENT_GID:-1000}"
     read_only: true
     tmpfs:
@@ -285,7 +310,7 @@ services:
       --gpu-memory-utilization ${LOCAL_LLM_GPU_MEM_UTIL:-0.92}
     volumes:
       # Persistent weight cache so a restart doesn't re-download the model.
-      - ../state/local-llm:/root/.cache/huggingface
+      - ../state/local-llm:/root/.cache/huggingface:z
     # NVIDIA GPU reservation (any CUDA-capable card, e.g. RTX 6000 Ada).
     # Requires the NVIDIA Container Toolkit + `nvidia` runtime on the host.
     deploy:
@@ -348,13 +373,10 @@ services:
     devices:
       - /dev/kfd
       - /dev/dri
-    # The container process must belong to the host's `video` and `render`
-    # groups to open /dev/dri/renderD*. Group NAMES work on most Linux hosts;
-    # if you hit permission errors, replace with the numeric GIDs from
-    # `getent group render` / `getent group video` on the host.
-    group_add:
-      - video
-      - render
+    # No group_add: Ollama runs as root inside the container, which can already
+    # open /dev/kfd and /dev/dri/renderD*. (Group NAMES in group_add resolve
+    # against the container's /etc/group, where `render` usually doesn't
+    # exist, and would make the container fail to start.)
     # Start the daemon, wait for it, pull the configured model once, then keep
     # serving. `$$` escapes Compose interpolation so the shell expands the var
     # at runtime. NOTE: clawshell-inference is internal (no egress), so this
@@ -369,7 +391,7 @@ services:
         wait
     volumes:
       # Persistent model store so a restart doesn't re-pull the model.
-      - ../state/local-llm-amd:/root/.ollama
+      - ../state/local-llm-amd:/root/.ollama:z
     shm_size: "16g"
     security_opt:
       - no-new-privileges:true
@@ -414,6 +436,11 @@ services:
       HTTP_PROXY: "http://quota-guard:8080"
       HTTPS_PROXY: "http://quota-guard:8080"
       NO_PROXY: "local-llm,local-llm-amd,sandbox-dind,localhost,127.0.0.1"
+      # Trust quota-guard's TLS-intercepting CA (Go uses SSL_CERT_FILE, Node
+      # uses NODE_EXTRA_CA_CERTS). The bundle only contains that one CA, which
+      # is fine: every upstream call goes through quota-guard.
+      SSL_CERT_FILE: /etc/clawshell-ca/clawshell-egress-ca.pem
+      NODE_EXTRA_CA_CERTS: /etc/clawshell-ca/clawshell-egress-ca.pem
       # The REAL upstream OpenAI-compatible endpoint — set this to what
       # MODEL_PROVIDER_BASE_URL used to point at before you enabled the
       # proxy. See docs/caveman-integration.md.
@@ -422,7 +449,8 @@ services:
     secrets:
       - model_provider_api_key
     volumes:
-      - ../state/caveman:/home/node/.caveman
+      - ../state/caveman:/home/node/.caveman:z
+      - ../state/quota-guard/public-ca:/etc/clawshell-ca:ro,z
     read_only: true
     tmpfs:
       - /tmp
@@ -467,11 +495,11 @@ services:
     # No `ports:`. The control API (8089) is loopback-only inside the container
     # and is driven by pentest-task.sh / scripts/scope.sh via `docker exec`.
     volumes:
-      - ../state/target-gateway:/state
-      - ../logs/target-gateway:/logs
+      - ../state/target-gateway:/state:z
+      - ../logs/target-gateway:/logs:z
       # Per-engagement scope is staged here by the launcher (operator-provided,
       # the agent cannot widen it). Read-only to the gateway.
-      - ../engagement/scope:/scope:ro
+      - ../engagement/scope:/scope:ro,z
     environment:
       BLACKBOX_LIVE_TESTING: "${BLACKBOX_LIVE_TESTING:-false}"
       TARGET_RATE_DEFAULT: "${TARGET_RATE_DEFAULT:-5}"

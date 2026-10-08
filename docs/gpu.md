@@ -86,7 +86,8 @@ The `local-llm` service (`compose/compose.yml`, container
   `state/local-llm` (mounted to `/root/.cache/huggingface`), so a restart does
   not re-download the model.
 - **Healthcheck.** Polls vLLM's `/health` with a 300s `start_period` to allow
-  for first-time weight download + load.
+  for loading the weights onto the GPU. The weights must already be staged (see
+  "Pre-staging the model"); the service cannot download them itself.
 - **Privacy.** `DO_NOT_TRACK=1`, and `HF_HUB_OFFLINE` can forbid any runtime
   download (see below).
 
@@ -133,8 +134,11 @@ headroom:
 - **Even bigger models.** With enough VRAM (roughly 80 GB+), 70B-class models or
   quantized larger models also fit; set `LOCAL_LLM_MODEL` to its HF id. Match any
   model-specific vLLM flags if required (edit the `command:` in `compose.yml`).
-- **Smaller cards.** On less VRAM, choose a smaller model (e.g. a 7B/14B coder)
-  and reduce `LOCAL_LLM_MAX_MODEL_LEN`.
+- **Smaller cards (desktop GPUs).** The default 32B model needs ~65 GB of VRAM
+  at full precision and will **not** load on a 24 GB/16 GB consumer card
+  (`install.sh` warns when the GPU has less than 80 GB). Use e.g.
+  `Qwen/Qwen2.5-Coder-14B-Instruct-AWQ` or `Qwen/Qwen2.5-Coder-7B-Instruct`
+  and reduce `LOCAL_LLM_MAX_MODEL_LEN` (e.g. `16384`).
 
 `LOCAL_LLM_GPU_MEM_UTIL=0.92` deliberately leaves a little VRAM free for
 stability; raise cautiously, lower if you see out-of-memory at load.
@@ -160,14 +164,16 @@ docker compose -f compose/compose.yml ps local-llm
 docker compose -f compose/compose.yml exec openclaw-gateway \
   curl -s http://local-llm:8000/v1/models
 
-# OpenClaw is pointed at the local model
-docker compose -f compose/compose.yml exec openclaw-gateway \
-  openclaw models set local/clawshell-local
+# Point OpenClaw at the local model (config-writing commands go through
+# openclaw-cli; the Gateway's config is read-only), then restart the Gateway
+docker compose -f compose/compose.yml run --rm openclaw-cli \
+  models set local/clawshell-local
+docker compose -f compose/compose.yml restart openclaw-gateway
 ```
 
-First startup downloads the weights, so the service can take several minutes to
-pass its healthcheck (hence the 300s `start_period`). Watch progress with
-`docker compose -f compose/compose.yml logs -f local-llm`.
+First startup loads the weights onto the GPU, so the service can take several
+minutes to pass its healthcheck (hence the 300s `start_period`). Watch progress
+with `docker compose -f compose/compose.yml --profile local-gpu logs -f local-llm`.
 
 ## AMD GPU (ROCm) backend
 
@@ -187,9 +193,9 @@ models on the AMD GPU via ROCm/HIP, no CUDA, no NVIDIA Container Toolkit.
 - **Model is an Ollama tag, not an HF id.** Set `LOCAL_LLM_MODEL` to a tag like
   `qwen2.5-coder:14b`. The service pulls it on first start (persisted in
   `state/local-llm-amd`) and OpenClaw addresses it as `ollama/<tag>`.
-- **GPU via device passthrough.** The container gets `/dev/kfd` + `/dev/dri`
-  and joins the host's `video`/`render` groups, the ROCm equivalent of the
-  NVIDIA device reservation. No toolkit install; `install.sh` just sanity-checks
+- **GPU via device passthrough.** The container gets `/dev/kfd` + `/dev/dri`,
+  the ROCm equivalent of the NVIDIA device reservation (Ollama runs as root in
+  the container, so no `group_add` is needed). No toolkit install; `install.sh` just sanity-checks
   the devices.
 - **vLLM-only knobs are ignored** (`LOCAL_LLM_IMAGE`, `LOCAL_LLM_SERVED_NAME`,
   `LOCAL_LLM_BASE_URL`, `LOCAL_LLM_MAX_MODEL_LEN`, `LOCAL_LLM_GPU_MEM_UTIL`).
@@ -198,8 +204,6 @@ models on the AMD GPU via ROCm/HIP, no CUDA, no NVIDIA Container Toolkit.
 
 1. The **amdgpu** kernel driver + **ROCm** so `/dev/kfd` and `/dev/dri` exist
    (`rocminfo` / `rocm-smi` work on the host).
-2. Your user able to access the render nodes (the container uses `group_add:
-   [video, render]`).
 
 ### Model & VRAM guidance (24 GB, e.g. RX 7900 XTX)
 
@@ -228,8 +232,9 @@ Then run `scripts/install.sh` (or `scripts/update.sh` on an existing box) and
 point OpenClaw at the model:
 
 ```bash
-docker compose -f compose/compose.yml exec openclaw-gateway \
-  openclaw models set ollama/qwen2.5-coder:14b
+docker compose -f compose/compose.yml run --rm openclaw-cli \
+  models set ollama/qwen2.5-coder:14b
+docker compose -f compose/compose.yml restart openclaw-gateway
 ```
 
 ### Verifying (AMD)
@@ -251,26 +256,29 @@ docker compose -f compose/compose.yml --profile local-gpu-amd logs -f local-llm-
 - **"no compatible GPUs"**, some cards need an LLVM-target override. Set
   `HSA_OVERRIDE_GFX_VERSION` in `.env` (e.g. `11.0.0`). The 7900 XTX (gfx1100)
   is natively supported and usually needs nothing.
-- **Permission denied on `/dev/dri/renderD*`**, the container's `group_add`
-  names (`video`, `render`) must match host groups. If they don't resolve,
-  replace them in `compose/compose.yml` with the **numeric** GIDs from
-  `getent group render` / `getent group video` on the host.
+- **Permission denied on `/dev/dri/renderD*`**, check the host device
+  permissions (`ls -l /dev/kfd /dev/dri`). If you run Ollama as a non-root
+  user, add a `group_add:` with the **numeric** GIDs from
+  `getent group render` / `getent group video` (group names resolve inside
+  the container, where `render` usually doesn't exist).
 
 ### Pre-staging the model (the inference network has no egress)
 
 The `clawshell-inference` network is `internal: true`, the model container has
 **no internet route** (so engagement data can't leave). That means the model
-must be present in `state/local-llm-amd` **before** the service can serve it; the
-in-container `ollama pull` only succeeds if the weights are already cached. Pull
-once, host-side, into the persistent volume using a throwaway container that
-*does* have network access:
+must be present in `/opt/clawshell/state/local-llm-amd` **before** the service can
+serve it; the in-container `ollama pull` only succeeds if the weights are already
+cached. Run this **after** `install.sh` (which installs Docker and creates the
+directory) using a throwaway container that *does* have network access, then
+restart the service:
 
 ```bash
-docker run --rm \
-  -v "$PWD/state/local-llm-amd:/root/.ollama" \
+sudo docker run --rm \
+  -v /opt/clawshell/state/local-llm-amd:/root/.ollama \
   --entrypoint /bin/sh \
   ollama/ollama:rocm \
   -lc 'ollama serve & sleep 3; ollama pull qwen2.5-coder:14b'
+sudo docker compose -f compose/compose.yml --profile local-gpu-amd restart local-llm-amd
 ```
 
 `--entrypoint /bin/sh` overrides the image's default `ollama` entrypoint;
@@ -278,9 +286,24 @@ without it, `sh` is treated as an Ollama subcommand and fails. The `:rocm`
 tag matches the AMD service's default image. Downloading weights does not
 require GPU device passthrough.
 
-(The NVIDIA/vLLM backend has the same constraint, pre-populate
-`state/local-llm` with the Hugging Face weights.) Once staged, the
-`local-llm-amd` service loads from the volume on every start.
+Once staged, the `local-llm-amd` service loads from the volume on every start.
+
+The NVIDIA/vLLM backend has the same constraint. Download the Hugging Face
+weights for `LOCAL_LLM_MODEL` into its cache with the vLLM image itself (it
+ships `huggingface_hub`), then restart the service:
+
+```bash
+sudo docker run --rm \
+  -v /opt/clawshell/state/local-llm:/root/.cache/huggingface \
+  -e HUGGING_FACE_HUB_TOKEN \
+  --entrypoint python3 \
+  vllm/vllm-openai:v0.30.0 \
+  -c "from huggingface_hub import snapshot_download; snapshot_download('Qwen/Qwen2.5-Coder-32B-Instruct')"
+sudo docker compose -f compose/compose.yml --profile local-gpu restart local-llm
+```
+
+Replace the model id with your `LOCAL_LLM_MODEL`. `install.sh` prints both
+commands with your configured values when it finds no staged model.
 
 ## Switching to a hosted provider instead
 

@@ -69,16 +69,21 @@ key.
   `install.sh` prints the exact command and stops. Run it once:
 
   ```bash
-  docker compose -f compose/compose.yml exec openclaw-gateway \
-    openclaw models auth login-github-copilot
+  docker compose -f compose/compose.yml run --rm openclaw-cli \
+    models auth login-github-copilot
   ```
 
   Then set a default model (use a model id your plan exposes):
 
   ```bash
-  docker compose -f compose/compose.yml exec openclaw-gateway \
-    openclaw models set github-copilot/claude-opus-4.6
+  docker compose -f compose/compose.yml run --rm openclaw-cli \
+    models set github-copilot/claude-opus-4.6
+  docker compose -f compose/compose.yml restart openclaw-gateway
   ```
+
+  Config-writing commands run in `openclaw-cli`: the Gateway's own view of
+  `openclaw.json5` is read-only (`OPENCLAW_CONFIG_READONLY=1`). OpenClaw may
+  drop comments when it rewrites the file.
 
 * **Headless**, set `COPILOT_GITHUB_TOKEN` in `.env` to a GitHub OAuth access
   token with Copilot access; `install.sh` completes onboarding non-interactively.

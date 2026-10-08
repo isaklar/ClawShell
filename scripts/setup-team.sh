@@ -60,21 +60,20 @@ info "Done: ${seeded} file(s) seeded, ${skipped} left untouched (already customi
 # actually see the resulting web_search tool (see config/openclaw.json5.example);
 # exploit/reporter keep zero web-tool access regardless. Requires
 # registry.npmjs.org to be reachable — see config/allowlist.conf. Non-fatal:
-# the Gateway must already be running (this uses the openclaw-cli compose
-# profile against it), so on a first-ever install this step is skipped and
-# retried by re-running this script after `docker compose up -d`.
-if docker compose -f compose/compose.yml ps openclaw-gateway 2>/dev/null | grep -q "Up"; then
+# the Gateway must already be running (openclaw-cli shares its network
+# namespace). install.sh runs this script again after `compose up -d`.
+if [[ -n "$(compose ps --status running -q openclaw-gateway 2>/dev/null)" ]]; then
   info "Installing DuckDuckGo web_search plugin (main/recon only)..."
-  if docker compose -f compose/compose.yml run --rm openclaw-cli \
+  if compose run --rm openclaw-cli \
       plugins install @openclaw/duckduckgo-plugin >/tmp/duckduckgo-plugin-install.log 2>&1; then
     info "DuckDuckGo plugin installed/already present."
   else
     warn "DuckDuckGo plugin install failed — see /tmp/duckduckgo-plugin-install.log. web_search will be unavailable until this succeeds. Common cause: registry.npmjs.org not yet allowlisted in config/allowlist.conf."
   fi
 else
-  warn "Gateway not running yet — skipping DuckDuckGo plugin install. Re-run ./scripts/setup-team.sh after 'docker compose -f compose/compose.yml up -d' to install it."
+  warn "Gateway not running yet — skipping DuckDuckGo plugin install (install.sh retries it after starting services; or re-run ./scripts/setup-team.sh once the stack is up)."
 fi
 
-info "If the Gateway is running, restart it to pick up config/openclaw.json5: docker compose -f compose/compose.yml restart openclaw-gateway"
-info "Verify the roster with: docker compose -f compose/compose.yml exec openclaw-gateway openclaw agents list --tree"
+info "If the Gateway is running, restart it to pick up config changes: sudo docker compose -f compose/compose.yml restart openclaw-gateway"
+info "Verify the roster with: sudo docker compose -f compose/compose.yml exec openclaw-gateway openclaw agents list --tree"
 info "Submit a task to a specific agent with: ./scripts/pentest-task.sh --agent recon --repo <url> --instruction \"...\""

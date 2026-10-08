@@ -21,8 +21,9 @@ trap 'rm -rf "${WORKDIR}"' EXIT
 
 mkdir -p "${WORKDIR}/state" "${WORKDIR}/config"
 cp -a /opt/clawshell/state/openclaw "${WORKDIR}/state/" 2>/dev/null || true
+cp -a /opt/clawshell/state/openclaw-config "${WORKDIR}/state/" 2>/dev/null || true
 cp -a /opt/clawshell/state/quota-guard "${WORKDIR}/state/" 2>/dev/null || true
-cp -a config/allowlist.conf config/openclaw.json5 "${WORKDIR}/config/" 2>/dev/null || true
+cp -a config/allowlist.conf "${WORKDIR}/config/" 2>/dev/null || true
 cp -a config/allowlist.d "${WORKDIR}/config/" 2>/dev/null || true
 
 if [[ "${METADATA_ONLY_WORKSPACES}" -eq 1 ]]; then

@@ -152,7 +152,7 @@ Full detail: **[docs/blackbox-live-testing.md](docs/blackbox-live-testing.md)**.
 * [docs/gpu.md](docs/gpu.md): on-box inference (NVIDIA/vLLM, AMD/ROCm), LOCAL_LLM_* vars, model/VRAM guidance, switching to a hosted provider
 * [docs/pentest-team.md](docs/pentest-team.md): the 4-agent team (Lead + Recon/Exploit/Reporter), delegation, per-agent models, read-only/report-only rules
 * [docs/security.md](docs/security.md): host hardening, credentials, full threat model
-* [docs/networking.md](docs/networking.md): Docker network topology, egress allowlist, nftables/DOCKER-USER
+* [docs/networking.md](docs/networking.md): Docker network topology, egress allowlist, nftables (own `inet clawshell` table)
 * [docs/blackbox-live-testing.md](docs/blackbox-live-testing.md): opt-in scoped live testing, the two egress lanes, target-gateway, the pentest-tools MCP toolset, risk tiers, approval flow
 * [docs/quota-protection.md](docs/quota-protection.md): circuit breaker state machine, per-task limits, defaults
 * [docs/caveman-integration.md](docs/caveman-integration.md): [caveman](https://github.com/JuliusBrussee/caveman) token-reduction skill and experimental proxy

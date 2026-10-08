@@ -39,37 +39,35 @@ cp .env.example .env
 
 Edit `.env`:
 
-- NVIDIA (default): leave the model settings as-is. Set `LAN_ALLOW_CIDR` to your
-  real subnet (e.g. `192.168.1.0/24`).
-- AMD desktop: set these plus `LAN_ALLOW_CIDR`:
+- `LAN_ALLOW_CIDR`: your real LAN subnet (e.g. `192.168.1.0/24`); only this
+  range can reach the Control UI/API. Set `LAN_ALLOW_CIDR6` too if you use IPv6
+  on the LAN.
+- **Desktop / workstation:** set `FIREWALL_INPUT_POLICY=accept`. The default
+  `drop` is for a dedicated appliance and blocks every other inbound port on
+  the host (KDE Connect, Steam, Syncthing, printing, etc.). Either way,
+  ClawShell only manages its own nftables table and leaves your existing
+  firewall rules alone.
+- GitHub: `GITHUB_AGENT_USERNAME`/`GITHUB_ALLOWED_REPOS` and the GitHub token
+  are optional; leave them blank if the agents don't need to push or open PRs.
+- NVIDIA (default): `LOCAL_LLM_BACKEND=nvidia`. The default model
+  (`Qwen/Qwen2.5-Coder-32B-Instruct`) needs a ~80 GB card. On a 24 GB or 16 GB
+  desktop GPU pick a smaller one, e.g.
+  ```
+  LOCAL_LLM_MODEL=Qwen/Qwen2.5-Coder-14B-Instruct-AWQ
+  LOCAL_LLM_MAX_MODEL_LEN=16384
+  ```
+- AMD desktop: set
   ```
   MODEL_PROVIDER=local-gpu
   LOCAL_LLM_BACKEND=amd-rocm
   LOCAL_LLM_MODEL=qwen2.5-coder:14b
   ```
+  The installer stops if `LOCAL_LLM_BACKEND=nvidia` (the default) is left on
+  an AMD box.
 
-See [gpu.md](gpu.md) for model/VRAM guidance (a smaller card, say 24 GB, should
-use a smaller model like `qwen2.5-coder:14b` rather than the larger default).
+See [gpu.md](gpu.md) for model/VRAM guidance.
 
-### 4. Stage the model once
-
-The model server has no internet access, so pre-download the model into its
-cache first.
-
-- AMD:
-  ```bash
-  docker run --rm \
-    -v "$PWD/state/local-llm-amd:/root/.ollama" \
-    --entrypoint /bin/sh \
-    ollama/ollama:rocm \
-    -lc 'ollama serve & sleep 3; ollama pull qwen2.5-coder:14b'
-  ```
-  `--entrypoint /bin/sh` overrides the image's default `ollama` entrypoint
-  so the shell command runs instead of being interpreted as Ollama CLI arguments.
-- NVIDIA: pre-populate `state/local-llm` with the Hugging Face weights for
-  `LOCAL_LLM_MODEL` (see `docs/gpu.md`).
-
-### 5. Run the installer
+### 4. Run the installer
 
 The installer detects the distribution from `/etc/os-release` and installs
 dependencies automatically:
@@ -92,10 +90,11 @@ upgrade; if package installation fails it directs you to update with
 
 Ubuntu remains the primary deployment target. These package paths are covered
 by mocked regression tests, not full deployment tests on every distribution.
-Fedora's SELinux policy may require additional bind-mount labeling; the
-installer does not disable SELinux. On Arch and Fedora, configure automatic
-security updates with your distribution's tools; apt-specific
-unattended-upgrades is skipped with a warning.
+On Fedora (SELinux enforcing), all bind mounts in `compose/compose.yml` carry
+the `:z` label so containers can use them; the installer does not disable
+SELinux. On Arch and Fedora, configure automatic security updates with your
+distribution's tools; apt-specific unattended-upgrades is skipped with a
+warning.
 
 Other distributions use the manual-dependency path: install the tools above
 with your package manager first. The installer checks them before continuing.
@@ -106,15 +105,50 @@ sudo ./scripts/install.sh
 
 It sets up Docker, the firewall, the sandbox, the four-agent team, and starts
 everything. It auto-generates the Gateway token (saved to `secrets/gateway_token`).
-When it finishes it prints the command to point the AI at your model:
+Data lives under `/opt/clawshell/`; the repo's `state/`, `secrets/`,
+`workspaces/`, `logs/`, `backups/`, `engagement/` and `config/openclaw.json5`
+become symlinks into it.
+
+### 5. Stage the model once
+
+The model server has no internet access (by design), so download the model into
+its cache with a one-off container, then restart the model service. The
+installer prints these commands with your configured model if nothing is staged.
+
+- AMD:
+  ```bash
+  sudo docker run --rm \
+    -v /opt/clawshell/state/local-llm-amd:/root/.ollama \
+    --entrypoint /bin/sh \
+    ollama/ollama:rocm \
+    -lc 'ollama serve & sleep 3; ollama pull qwen2.5-coder:14b'
+  sudo docker compose -f compose/compose.yml --profile local-gpu-amd restart local-llm-amd
+  ```
+- NVIDIA (replace the model id with your `LOCAL_LLM_MODEL`):
+  ```bash
+  sudo docker run --rm \
+    -v /opt/clawshell/state/local-llm:/root/.cache/huggingface \
+    -e HUGGING_FACE_HUB_TOKEN \
+    --entrypoint python3 \
+    vllm/vllm-openai:v0.30.0 \
+    -c "from huggingface_hub import snapshot_download; snapshot_download('Qwen/Qwen2.5-Coder-32B-Instruct')"
+  sudo docker compose -f compose/compose.yml --profile local-gpu restart local-llm
+  ```
+
+### 6. Point the AI at your model
+
+Config changes go through the `openclaw-cli` container (the Gateway's config is
+read-only to the Gateway itself), then restart the Gateway:
 
 ```bash
 # AMD
-docker compose -f compose/compose.yml exec openclaw-gateway \
-  openclaw models set ollama/qwen2.5-coder:14b
+sudo docker compose -f compose/compose.yml run --rm openclaw-cli \
+  models set ollama/qwen2.5-coder:14b
 # NVIDIA
-docker compose -f compose/compose.yml exec openclaw-gateway \
-  openclaw models set local/clawshell-local
+sudo docker compose -f compose/compose.yml run --rm openclaw-cli \
+  models set local/clawshell-local
+
+sudo docker compose -f compose/compose.yml restart openclaw-gateway
 ```
 
 The platform is now running and waiting for work.
@@ -163,7 +197,7 @@ on your LAN can start an engagement. Two things gate access:
 - Auth: every request needs the Gateway token as a bearer header. Read it on the
   box:
   ```bash
-  cat /opt/clawshell-src/secrets/gateway_token
+  sudo cat /opt/clawshell/secrets/gateway_token
   ```
 
 You address an agent as the model `openclaw/<agentId>`, use `openclaw/main` for

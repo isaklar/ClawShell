@@ -7,7 +7,25 @@ set -eu
 python3 /app/control_api.py &
 CONTROL_PID=$!
 
-trap 'kill "$CONTROL_PID" 2>/dev/null || true' TERM INT
+# mitmproxy intercepts TLS, so clients must trust its CA. Publish ONLY the
+# public cert (never mitmproxy-ca.pem, which contains the private key) to a
+# separate dir that compose mounts read-only into the Node/Go clients.
+mkdir -p /state/public-ca
+(
+  while :; do
+    if [ -s /state/mitmproxy/mitmproxy-ca-cert.pem ]; then
+      if ! cmp -s /state/mitmproxy/mitmproxy-ca-cert.pem /state/public-ca/clawshell-egress-ca.pem 2>/dev/null; then
+        cp /state/mitmproxy/mitmproxy-ca-cert.pem /state/public-ca/.ca.tmp \
+          && chmod 0644 /state/public-ca/.ca.tmp \
+          && mv /state/public-ca/.ca.tmp /state/public-ca/clawshell-egress-ca.pem
+      fi
+    fi
+    sleep 5
+  done
+) &
+CA_PID=$!
+
+trap 'kill "$CONTROL_PID" "$CA_PID" 2>/dev/null || true' TERM INT
 
 exec mitmdump \
   --mode regular \
