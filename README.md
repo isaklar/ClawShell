@@ -61,6 +61,12 @@ sudo ./scripts/install.sh                 # idempotent; stages the model onto th
 ./scripts/healthcheck.sh
 ```
 
+Ubuntu/Debian is the primary target. The installer also installs dependencies
+automatically on Arch/CachyOS/Manjaro (pacman) and Fedora (dnf), including
+Docker, Compose and missing NVIDIA Container Toolkit. GPU drivers are still a
+host prerequisite. See [docs/quickstart.md](docs/quickstart.md) for the
+distribution-specific limitations and manual fallback for other distributions.
+
 With the default `MODEL_PROVIDER=local-gpu` there is no external auth or device
 login; first start can take a few minutes while weights load. GitHub
 credentials are **optional**, only needed to clone a private git `--target`

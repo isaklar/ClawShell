@@ -27,6 +27,7 @@ These are safe anywhere and gate every change:
 | --- | --- |
 | `test-static-validation.sh` | Shell syntax across `scripts/`, `caveman-proxy/`, `tests/`; `install.sh` phase numbering is sequential; every `.env.example` var is referenced somewhere; allowlist defaults are consistent; secrets-hygiene (nothing gitignored is tracked); `docker compose config` validates with placeholder secrets. |
 | `test-credential-provider-logic.sh` | The model-provider credential decision logic (which provider needs which key). |
+| `test-install-packages.sh` | Installer package phase with mocked host tools: Ubuntu/Debian apt, Arch/CachyOS/Manjaro pacman, Fedora dnf, derivative detection, Docker/Compose installation, NVIDIA toolkit configuration, manual fallback, post-install checks, fatal package/restart errors, and apt-only unattended-upgrades. Does not prove a full deployment works on every distribution. |
 | `test-github-repo-scope-logic.sh` | `GITHUB_ALLOWED_REPOS` parsing / repo-scope enforcement logic. |
 | `test-blackbox-killswitch.sh` | The black-box live-testing kill switch is enforced in depth: the `target-gateway` entrypoint refuses to start unless `BLACKBOX_LIVE_TESTING=true` (so a direct `docker compose --profile blackbox-live up` cannot arm it), the guard precedes `exec mitmdump`, upstream TLS verification is asserted (`ssl_insecure=false`), the launcher gates `--live`, and the `disarm_live` EXIT/INT/TERM trap is installed. |
 | `test-python-unit.sh` | The Python unit suite under `tests/unit/` (see below). |

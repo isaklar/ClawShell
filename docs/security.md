@@ -28,10 +28,11 @@ of the OpenClaw Gateway process.
   full ruleset and the `DOCKER-USER` chain interaction (Docker rewrites
   iptables/nftables in ways that bypass naive `INPUT` rules for published
   container ports, this repo's firewall config accounts for that).
-* **Unattended upgrades**: `unattended-upgrades` installed and configured for
+* **Unattended upgrades**: on Ubuntu/Debian, `unattended-upgrades` is installed and configured for
   security updates only, with automatic reboot disabled by default (you
   reboot on your own schedule; a silently-rebooted always-on box is its own
-  failure mode). Toggle via `.env`.
+  failure mode). Toggle via `.env`. Arch and Fedora receive a warning instead;
+  automatic security updates must be configured using the host's own tools.
 * **Minimal packages**: install.sh installs only what's required (Docker
   Engine + Compose plugin, nftables, unattended-upgrades, curl, jq,
   age/sops for secret handling, fail2ban optional). No desktop environment,

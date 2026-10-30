@@ -26,13 +26,24 @@ sudo ./scripts/install.sh
 
 `install.sh` phases (each idempotent, each printed as it runs):
 
-1. **Preflight**, checks for a Debian/Ubuntu-family package manager (apt) and
-   x86_64, checks `.env` exists and
+1. **Preflight**, checks x86_64, checks `.env` exists and
    has no placeholder values for required keys, checks it's run as root/sudo,
    checks it is not about to lock out SSH.
-2. **Packages**, installs Docker Engine + Compose plugin (official Docker
-   apt repo, pinned to the distro codename), nftables, unattended-upgrades,
-   curl, jq, age.
+2. **Packages**, detects the distribution using `/etc/os-release` (`ID` and
+   `ID_LIKE`), then installs dependencies with apt (Ubuntu/Debian, primary
+   target), pacman (Arch/CachyOS/Manjaro), or dnf (Fedora).
+   Installs Docker Engine + Compose, nftables, curl, jq, age, OpenSSL and CA
+   certificates; missing NVIDIA Container Toolkit is installed and configured
+   for local NVIDIA inference. Ubuntu/Debian and Fedora use Docker's official
+   repository when needed; Arch uses distribution packages without a
+   database-only refresh or automatic full system upgrade.
+   Existing Docker installations are preserved; missing Compose is installed
+   separately on apt/dnf hosts. Package failures abort installation.
+   Unsupported distributions use manually installed dependencies. All paths
+   check required commands and the Compose plugin before continuing.
+   Apt-specific unattended-upgrades is configured only on Ubuntu/Debian;
+   other hosts receive a warning to configure security updates themselves.
+   See [quickstart.md](quickstart.md) for deployment limitations.
 3. **System user + directories**, creates the `clawshell` system user
    (no login shell, no password) and `/opt/clawshell/{secrets,state,
    workspaces,logs,backups}` with correct ownership/permissions.

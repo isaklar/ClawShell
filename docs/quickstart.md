@@ -58,13 +58,47 @@ cache first.
 
 - AMD:
   ```bash
-  docker run --rm -v "$PWD/state/local-llm-amd:/root/.ollama" \
-    ollama/ollama sh -lc 'ollama serve & sleep 3; ollama pull qwen2.5-coder:14b'
+  docker run --rm \
+    -v "$PWD/state/local-llm-amd:/root/.ollama" \
+    --entrypoint /bin/sh \
+    ollama/ollama:rocm \
+    -lc 'ollama serve & sleep 3; ollama pull qwen2.5-coder:14b'
   ```
+  `--entrypoint /bin/sh` overrides the image's default `ollama` entrypoint
+  so the shell command runs instead of being interpreted as Ollama CLI arguments.
 - NVIDIA: pre-populate `state/local-llm` with the Hugging Face weights for
   `LOCAL_LLM_MODEL` (see `docs/gpu.md`).
 
 ### 5. Run the installer
+
+The installer detects the distribution from `/etc/os-release` and installs
+dependencies automatically:
+
+| Distribution | Package manager | Docker / Compose source |
+| --- | --- | --- |
+| Ubuntu / Debian (primary target) | apt | Official Docker repository when Docker or Compose is missing |
+| Arch / CachyOS / Manjaro | pacman | Distribution packages |
+| Fedora | dnf | Official Docker RPM repository when Docker or Compose is missing |
+
+This includes curl, jq, nftables, age, OpenSSL, CA certificates, Docker,
+Compose, and (for NVIDIA local inference) NVIDIA Container Toolkit with Docker
+runtime configuration. GPU drivers remain a manual prerequisite; systemd is
+required. Package or runtime-configuration errors stop the installer.
+
+Keep Arch-family hosts up to date before installing. The installer uses the
+existing pacman database, never `pacman -Sy` or an unattended full system
+upgrade; if package installation fails it directs you to update with
+`pacman -Syu` first.
+
+Ubuntu remains the primary deployment target. These package paths are covered
+by mocked regression tests, not full deployment tests on every distribution.
+Fedora's SELinux policy may require additional bind-mount labeling; the
+installer does not disable SELinux. On Arch and Fedora, configure automatic
+security updates with your distribution's tools; apt-specific
+unattended-upgrades is skipped with a warning.
+
+Other distributions use the manual-dependency path: install the tools above
+with your package manager first. The installer checks them before continuing.
 
 ```bash
 sudo ./scripts/install.sh

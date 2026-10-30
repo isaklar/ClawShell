@@ -40,9 +40,25 @@ model and/or a shorter context (see
 2. The **NVIDIA Container Toolkit** (the `nvidia` container runtime), so Docker
    can expose the GPU to a container.
 
-`scripts/install.sh` **auto-installs the NVIDIA Container Toolkit** when
-`MODEL_PROVIDER=local-gpu` and `LOCAL_LLM_BACKEND=nvidia` (Phase 2) on supported
-Ubuntu/Debian hosts. The GPU driver itself is not installed by ClawShell, install the vendor driver first. Verify the host sees the GPU before deploying:
+`scripts/install.sh` **auto-installs missing NVIDIA Container Toolkit** when
+`MODEL_PROVIDER=local-gpu` and `LOCAL_LLM_BACKEND=nvidia` (Phase 2).
+Ubuntu/Debian use NVIDIA's apt repository, Arch/CachyOS/Manjaro use the
+distribution package, and Fedora uses NVIDIA's RPM repository. Whether newly
+installed or already present, the script configures Docker's NVIDIA runtime
+and restarts Docker; configuration or restart failures abort the installer.
+
+On unsupported distributions, install the toolkit with your package manager
+first. The installer then configures Docker automatically. To configure the
+runtime independently of the installer:
+
+```bash
+sudo nvidia-ctk runtime configure --runtime=docker
+sudo systemctl restart docker
+```
+
+The installer stops with instructions if `nvidia-ctk` is missing on an
+unsupported distribution. The GPU driver itself is never installed by
+ClawShell; install the vendor driver first. Verify the host sees the GPU:
 
 ```bash
 nvidia-smi
@@ -250,9 +266,17 @@ once, host-side, into the persistent volume using a throwaway container that
 *does* have network access:
 
 ```bash
-docker run --rm -v "$PWD/state/local-llm-amd:/root/.ollama" \
-  ollama/ollama sh -lc 'ollama serve & sleep 3; ollama pull qwen2.5-coder:14b'
+docker run --rm \
+  -v "$PWD/state/local-llm-amd:/root/.ollama" \
+  --entrypoint /bin/sh \
+  ollama/ollama:rocm \
+  -lc 'ollama serve & sleep 3; ollama pull qwen2.5-coder:14b'
 ```
+
+`--entrypoint /bin/sh` overrides the image's default `ollama` entrypoint;
+without it, `sh` is treated as an Ollama subcommand and fails. The `:rocm`
+tag matches the AMD service's default image. Downloading weights does not
+require GPU device passthrough.
 
 (The NVIDIA/vLLM backend has the same constraint, pre-populate
 `state/local-llm` with the Hugging Face weights.) Once staged, the
