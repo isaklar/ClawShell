@@ -3,33 +3,18 @@
 ## Overview
 
 ```
-Internet
-   ▲
-   │ only quota-guard has a default route out
-   │
-┌──┴─────────────┐        ┌────────────────────┐
-│ quota-guard     │        │ Linux host          │
-│ (mitmproxy)     │        │ nftables: default   │
-│ egress allowlist│        │ deny inbound        │
-└──┬──────────────┘        └─────────┬───────────┘
-   │ docker network: clawshell-egress    │ LAN CIDR allow: SSH, Control UI
-   │ (no default route to internet;  │
-   │  only quota-guard's veth does)  │
-┌──▼──────────────┐                  │
-│ openclaw-gateway │◄─────published──┘  (only if you bind beyond loopback)
-│                  │   port 18789 (Control UI), LAN-restricted
-└──┬───────────────┘
-   │ sandbox-control (talks to sandbox-dind's Docker API over TCP on
-   │ clawshell-sandbox network only, not the host socket)
-┌──▼───────────────┐        docker network: clawshell-sandbox
-│ sandbox-dind      │        (rootless Docker-in-Docker; NO internet route,
-│ (rootless DinD)   │◄────►  NO route to clawshell-egress, NO route to your LAN)
-└──┬───────────────┘
-   │ spawns
-┌──▼───────────────┐
-│ per-session       │
-│ sandbox container │  runs agent-directed shell/build/test commands
-└───────────────────┘
+LAN client -> host:18789 -> gateway-ui (clawshell-ui, published ingress)
+                              |
+                     clawshell-control (internal)
+                              |
+                        openclaw-gateway
+                         |           |
+          clawshell-egress           clawshell-sandbox (internal)
+              (internal)             |
+                  |               sandbox-dind -> per-session sandboxes
+              quota-guard
+                  |
+           provider/GitHub egress
 ```
 
 ## Docker networks
@@ -38,11 +23,21 @@ Internet
 | --- | --- | --- | --- |
 | `clawshell-egress` | Only via quota-guard (no direct route) | No | Gateway ⇄ quota-guard |
 | `clawshell-sandbox` | **None** | No (except an optional explicit allowlist.d/ rule, see below) | OpenClaw's tool-execution sandbox containers via nested rootless DinD |
-| `clawshell-control` (internal, loopback-published) | N/A | Published to LAN CIDR only, if you choose | Control UI / Gateway API |
+| `clawshell-control` (internal) | **None** | No direct published port | `gateway-ui` ⇄ Gateway UI/API |
+| `clawshell-ui` | Relay process only; agents never attach | UI port published, restricted by host LAN firewall | Fixed-destination UI ingress |
 | `clawshell-inference` (internal) | **None** | No | Gateway ⇄ `local-llm` GPU model server (only when `MODEL_PROVIDER=local-gpu`) |
 | `clawshell-mcp` (internal) | **None** | No | Gateway ⇄ `pentest-tools-mcp` (only when the `blackbox-live` profile is up) |
 | `clawshell-target` (internal) | **None** | No | `pentest-tools-mcp` ⇄ `target-gateway` (black-box live lane) |
 | `clawshell-target-uplink` | Only via `target-gateway` (deny-by-default, in-scope only) | No | `target-gateway` → authorized live-testing targets |
+
+Docker does not publish a container's ports when all of its networks are
+internal. The `gateway-ui` service therefore owns the host UI port and connects
+to the internal Gateway through a fixed TCP relay (`scripts/gateway_ui.py`).
+Its only upstream is `openclaw-gateway:18789`; client input cannot select a host
+or turn it into an HTTP CONNECT/SOCKS proxy. Raw bytes are preserved for HTTP,
+WebSockets and any end-to-end TLS. Gateway authentication remains in OpenClaw.
+The relay runs non-root with a read-only filesystem, no capabilities or Docker
+socket, and a bounded connection count. Agents never join its external bridge.
 
 > **GPU inference stays on-box.** When `MODEL_PROVIDER=local-gpu` (the default),
 > the model server, `local-llm` (NVIDIA/vLLM) or `local-llm-amd` (AMD/ROCm,

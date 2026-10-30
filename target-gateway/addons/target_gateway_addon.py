@@ -28,7 +28,8 @@ API + .conf file), deliberately, for codebase consistency. It does not reuse
 quota-guard itself.
 """
 
-from __future__ import annotations
+# Keep dataclass annotations concrete: mitmproxy 11 executes scripts without
+# registering their module in sys.modules, which breaks string annotation lookup.
 
 import json
 import os

@@ -23,21 +23,17 @@ os.environ["QUOTA_GUARD_ALLOWLIST_DIR"] = tmp
 os.environ["QUOTA_GUARD_STATIC_ALLOWLIST"] = os.path.join(tmp, "allowlist.conf")
 open(os.environ["QUOTA_GUARD_STATIC_ALLOWLIST"], "w").close()
 
-# The addon does `from mitmproxy import http, ctx` at import time. mitmproxy
-# is not needed to exercise the pure-Python repo-scope helpers under test and
-# is not installed in minimal/CI environments, so register a lightweight stub
-# before importing. `from __future__ import annotations` in the addon keeps
-# the http.* type hints unevaluated, so empty stub modules suffice.
-import types
-_mitm = types.ModuleType("mitmproxy")
-_mitm.http = types.ModuleType("mitmproxy.http")
-_mitm.ctx = types.ModuleType("mitmproxy.ctx")
-sys.modules.setdefault("mitmproxy", _mitm)
-sys.modules.setdefault("mitmproxy.http", _mitm.http)
-sys.modules.setdefault("mitmproxy.ctx", _mitm.ctx)
+# Use the shared typed stub: addon annotations are concrete, so empty http/ctx
+# modules no longer suffice on the Python 3.11/3.12 versions used in CI.
+sys.path.insert(0, "tests/unit")
+import _stubs
+_stubs.install_mitmproxy_stub()
 
 sys.path.insert(0, "quota-guard/addons")
 import quota_guard_addon as qg
+# Force annotation resolution on Python versions that otherwise defer it.
+import typing
+typing.get_type_hints(qg.QuotaGuardAddon.requestheaders)
 
 checks = []
 
@@ -109,6 +105,9 @@ if not all(p for _, p in checks):
     sys.exit(1)
 PYEOF
 PY_RC=$?
+if [[ ${PY_RC} -ne 0 ]]; then
+  cat "${OUT}" >&2
+fi
 
 while IFS=$'\t' read -r status name; do
   [[ -z "${status:-}" ]] && continue

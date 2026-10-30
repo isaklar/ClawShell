@@ -32,3 +32,49 @@ jobs:
 
       - name: Run regression suite
         run: bash tests/run-all.sh
+
+  mcp-runtime:
+    name: mcp-runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up runtime Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install the container's MCP dependencies
+        run: python3 -m pip install -r pentest-tools-mcp/requirements.txt
+
+      - name: Validate dependencies and exercise actual MCP server
+        run: |
+          python3 -m pip check
+          python3 tests/integration/check_mcp_runtime.py
+
+  integration:
+    name: docker-integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Run real Docker boundary and recovery tests
+        run: bash tests/run-integration.sh --artifacts "$RUNNER_TEMP/clawshell-integration-artifacts"
+
+      - name: Upload integration diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-integration-diagnostics
+          path: ${{ runner.temp }}/clawshell-integration-artifacts
+          if-no-files-found: warn
+          retention-days: 7

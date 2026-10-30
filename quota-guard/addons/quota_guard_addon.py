@@ -20,7 +20,8 @@ Design constraints this addon respects (see docs/quota-protection.md):
     a container restart never silently resets a QUOTA_EXHAUSTED/PAUSED state.
 """
 
-from __future__ import annotations
+# Keep dataclass annotations concrete: mitmproxy 11 executes scripts without
+# registering their module in sys.modules, which breaks string annotation lookup.
 
 import ipaddress
 import json

@@ -1,0 +1,7 @@
+FROM python:3.12-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+COPY scripts/lib/recovery.py /recovery.py
+COPY tests/integration/volume_recovery.py /volume_recovery.py
+ENTRYPOINT ["python3", "/volume_recovery.py"]

@@ -112,6 +112,10 @@ requires `--rollback` before another update/task. Do not submit tasks directly
 through the UI/API during any maintenance window; the shell lock does not govern
 those external clients. Backup/restore also take this lock.
 
+The UI port is owned by `gateway-ui`, a fixed-destination TCP relay; the Gateway
+itself remains on internal networks. Update/install starts this service and the
+normal healthcheck requires it. See [Networking](networking.md) for the topology.
+
 The updater:
 
 1. Saves the deployed commit, protected `.env`, resolved Compose config, exact
