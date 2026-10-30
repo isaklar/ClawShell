@@ -239,11 +239,18 @@ print('read-only checks passed')"""
 
     def collect(self):
         self.artifacts.mkdir(parents=True, exist_ok=True)
+        failed = any(result.get('status') == 'failed' for result in self.results)
         for name, arguments in [('compose.log', ('logs', '--no-color')), ('status.json', ('ps', '-a', '--format', 'json'))]:
             try:
-                (self.artifacts / name).write_text(self.compose(*arguments))
+                output = self.compose(*arguments)
             except Exception as exc:
-                (self.artifacts / name).write_text(str(exc))
+                output = str(exc)
+            (self.artifacts / name).write_text(output)
+            if failed:
+                # Preserve complete artifacts, but bound console output. Startup
+                # tracebacks must be visible without downloading an artifact.
+                print(f'--- Integration failure: {name} (last 300 lines) ---', file=sys.stderr)
+                print('\n'.join(output.splitlines()[-300:]), file=sys.stderr, flush=True)
         (self.artifacts / 'results.json').write_text(json.dumps(self.results, indent=2))
 
 
@@ -267,6 +274,15 @@ def main():
             prepared = True
             stack.compose('--profile', 'maintenance', 'build', '--pull', timeout=1200)
             stack.compose('run', '--rm', '-T', '--no-deps', 'recovery-worker', 'init')
+            # Exercise the actual mitmproxy loader before starting dependent
+            # services, so an addon import failure is reported at its source.
+            for service, filename in (('quota-guard', 'quota_guard_addon.py'),
+                                      ('target-gateway', 'target_gateway_addon.py')):
+                stack.compose('run', '--rm', '-T', '--no-deps', '--entrypoint', 'python3', service,
+                    '-c', 'import sys; from mitmproxy.addons.script import load_script; '
+                    'module=load_script(sys.argv[1]); '
+                    'assert module is not None and getattr(module, "addons", None), "Addon failed to load"',
+                    '/app/addons/' + filename)
             stack.compose('up', '-d', '--no-build', '--wait', '--wait-timeout', '180', timeout=240)
             for name in ('network', 'filesystem', 'scope', 'killswitch', 'circuit', 'recovery'):
                 if args.case not in ('all', name):

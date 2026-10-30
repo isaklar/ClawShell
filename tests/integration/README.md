@@ -33,7 +33,8 @@ the printed `clawshell-test-*` project name afterwards.
 
 The actual quota-guard, target-gateway and pentest-tools MCP images are built
 from their production Dockerfiles and run with their real dependencies and
-entrypoints. A small Python HTTP server replaces the OpenClaw process so network
+entrypoints. Before startup, a preflight loads both addons with the actual
+mitmproxy script loader inside their built images. A small Python HTTP server replaces the OpenClaw process so network
 and filesystem assertions do not require a model or credentials. No real
 OpenClaw, nested Docker, GPU or Caveman compatibility is established by this suite.
 The probe's HTTP server additionally checks host access to the published UI port;
@@ -65,6 +66,7 @@ and full rollback scripts remain covered by the existing simulated-Docker
 maintenance suite. A full install → update → failed update → rollback exercise
 with actual OpenClaw on a disposable VM remains a separate release requirement.
 
-Diagnostics are written under `<artifacts>/<project>/`: container logs, status
+On failure, the last 300 lines of container logs/status are also printed directly
+in the CI console. Complete diagnostics are written under `<artifacts>/<project>/`: container logs, status
 and structured case results. CI retains them for seven days, including failures.
 The fixture contains no production credentials or engagement data.

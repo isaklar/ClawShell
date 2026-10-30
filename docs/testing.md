@@ -47,6 +47,8 @@ are redirected only in those disposable fixture copies.
 
 | Module | Coverage |
 | --- | --- |
+| `test_addon_script_loading.py` | Both proxy addons load under mitmproxy 11's unregistered-module script-loading behavior; catches dataclass/string-annotation startup failures hidden by ordinary imports. |
+| `test_integration_diagnostics.py` | Failed integration runs retain complete artifacts and print bounded container logs/status directly in CI. |
 | `test_target_gateway_addon.py` | The `target-gateway` decision logic and the full `request()`/`response()` lifecycle: deny-by-default scope, encoded-traversal rejection (`%2e%2e`/`%2f`), SSRF / internal-address blocking (loopback, link-local incl. cloud metadata, RFC1918; `localhost` scope refused), effective-method gating (a method-override header cannot smuggle a `DELETE` past a Tier-0 `GET`), full-path approval descriptors (one approval does not cover sibling endpoints), rate limiting, fail-closed state parsing, and denied-flow evidence-log integrity. |
 | `test_control_api.py` | The loopback control API (state helpers + the HTTP handler over an in-process server): engagement start/stop, approve/revoke, status + scope summary, and fail-closed handling of bad JSON / unknown routes. |
 | `test_pentest_tools_mcp.py` | The pentest-tools MCP server: gateway-decision parsing (`blocked_by` -> `gateway_decision` / `action_needed`), body truncation, technology fingerprint markers, and the kill switch (the `__main__` guard refuses to start unless `BLACKBOX_LIVE_TESTING=true`). |
