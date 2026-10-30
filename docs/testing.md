@@ -59,6 +59,25 @@ are redirected only in those disposable fixture copies.
 | `test_static_validation_safety.py` | Compose validation leaves existing state/secrets/workspace symlinks and their contents intact. |
 | `_stubs.py` | Shared `mitmproxy` / `mcp` stubs so the suite runs where those packages are absent. |
 
+### Actual MCP runtime (separate CI job)
+
+The `mcp-runtime` job uses Python 3.12, installs
+`pentest-tools-mcp/requirements.txt` (the same manifest as the production image),
+runs `pip check`, and executes `tests/integration/check_mcp_runtime.py` in a
+separate process without the unit suite's MCP stubs. It starts the actual server
+and exercises MCP initialization, tool listing and tool calls against a loopback
+proxy fixture, including preservation of an explicit scope-denial response.
+No Docker, external target or API credential is needed for this job.
+
+This catches SDK/Pydantic import failures and tool-registration errors that
+ordinary stubbed unit tests cannot detect. The MCP Docker build also checks the
+real SDK import and tool registration. Keep the tested MCP/Pydantic/settings
+versions together: MCP 1.9.4 uses a private Pydantic helper, so its broad declared
+Pydantic version range alone does not guarantee compatibility. The canonical
+Streamable HTTP endpoint for this SDK is `/mcp/`, including the trailing slash.
+The manifest pins the compatibility-sensitive dependencies; this is not a full
+transitive dependency lock.
+
 ### Real Docker integration (separate CI job)
 
 ```bash

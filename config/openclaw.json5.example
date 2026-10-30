@@ -252,7 +252,7 @@
       "pentest-tools": {
         // Internal compose hostname; reachable only over clawshell-mcp (an
         // internal network with no route out). Streamable-HTTP transport.
-        url: "http://pentest-tools-mcp:8765/mcp",
+        url: "http://pentest-tools-mcp:8765/mcp/",
         transport: "streamable-http",
         // Tools from this server are grouped under group:mcp for tool-policy.
         toolGroup: "mcp",

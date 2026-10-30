@@ -199,10 +199,10 @@ print('read-only checks passed')"""
         sibling = request('/other', method='POST')
         check(sibling['status'] == 403, 'Approval leaked to a different endpoint')
         # Exercise the real MCP transport and tool registration, not a stubbed import.
-        positive = self.probe('mcp', url='http://pentest-tools-mcp:8765/mcp', tool='http_request',
+        positive = self.probe('mcp', url='http://pentest-tools-mcp:8765/mcp/', tool='http_request',
                               arguments={'url': 'http://target.test:8080/mcp'})
         check(positive.get('status') == 200, f'MCP cannot reach scoped target: {positive}')
-        denied = self.probe('mcp', url='http://pentest-tools-mcp:8765/mcp', tool='http_request',
+        denied = self.probe('mcp', url='http://pentest-tools-mcp:8765/mcp/', tool='http_request',
                            arguments={'url': 'http://out-of-scope.test:8080/mcp-denied'})
         check(denied.get('gateway_decision') == 'out_of_scope', f'MCP lost policy decision: {denied}')
         # Backoff must suppress actual target traffic, not just log a warning.

@@ -33,6 +33,27 @@ jobs:
       - name: Run regression suite
         run: bash tests/run-all.sh
 
+  mcp-runtime:
+    name: mcp-runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up runtime Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install the container's MCP dependencies
+        run: python3 -m pip install -r pentest-tools-mcp/requirements.txt
+
+      - name: Validate dependencies and exercise actual MCP server
+        run: |
+          python3 -m pip check
+          python3 tests/integration/check_mcp_runtime.py
+
   integration:
     name: docker-integration
     runs-on: ubuntu-latest

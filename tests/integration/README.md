@@ -31,6 +31,11 @@ image tags are removed in `finally`, including on ordinary test failures.
 SIGKILL or daemon/host failure can prevent cleanup; remove only resources with
 the printed `clawshell-test-*` project name afterwards.
 
+A separate `mcp-runtime` CI job tests the actual MCP server without Docker using
+the image's shared dependency manifest, including real protocol/tool calls against
+a local proxy fixture. Its command is `python3 tests/integration/check_mcp_runtime.py`
+after installing `pentest-tools-mcp/requirements.txt`.
+
 The actual quota-guard, target-gateway and pentest-tools MCP images are built
 from their production Dockerfiles and run with their real dependencies and
 entrypoints. Before startup, a preflight loads both addons with the actual
