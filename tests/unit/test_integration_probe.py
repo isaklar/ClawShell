@@ -42,6 +42,15 @@ class ProbeTests(unittest.TestCase):
         after = json.loads(probe.request(url + '/stats')['body'])['GET /quota']
         self.assertEqual(after, before + 1)
 
+    def test_terminal_quota_and_retryable_throttle_have_distinct_reset_signals(self):
+        url = self.server(mock_http.Handler)
+        quota = probe.request(url + '/quota')
+        throttle = probe.request(url + '/throttle')
+        self.assertEqual(quota['status'], 429)
+        self.assertNotIn('Retry-After', quota['headers'])
+        self.assertEqual(throttle['status'], 429)
+        self.assertEqual(throttle['headers']['Retry-After'], '60')
+
     def test_network_error_cannot_masquerade_as_policy_denial(self):
         server = ThreadingHTTPServer(('127.0.0.1', 0), mock_http.Handler)
         port = server.server_port

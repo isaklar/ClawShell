@@ -122,7 +122,7 @@ print(urllib.request.urlopen(req,timeout=5).read().decode())"""
             check(not self.probe('connect', service=origin, host=service, port=port)['connected'],
                   f'{service} loopback control API is exposed to Gateway')
         # Publishing the UI must still work with the control network internal.
-        mapping = self.compose('port', 'openclaw-gateway', '18789')
+        mapping = self.compose('port', 'gateway-ui', '18789')
         with urllib.request.build_opener(urllib.request.ProxyHandler({})).open('http://' + mapping, timeout=5) as response:
             check(response.status == 200, 'Internal control network broke published UI reachability')
 
@@ -206,7 +206,7 @@ print('read-only checks passed')"""
                            arguments={'url': 'http://out-of-scope.test:8080/mcp-denied'})
         check(denied.get('gateway_decision') == 'out_of_scope', f'MCP lost policy decision: {denied}')
         # Backoff must suppress actual target traffic, not just log a warning.
-        check(request('/quota')['status'] == 429, 'Target backpressure fixture failed')
+        check(request('/throttle')['status'] == 429, 'Target backpressure fixture failed')
         before = self.stats('target')
         cooled = request('/must-not-forward')
         check(cooled['status'] == 429 and json.loads(cooled['body'])['reason'] == 'cooling_down',

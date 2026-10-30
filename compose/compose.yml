@@ -1,13 +1,15 @@
 # ClawShell Docker Compose stack.
 #
 # Network topology (see docs/networking.md for the full diagram):
-#   clawshell-control   : bridge, published to LAN_ALLOW_CIDR only -> Control UI/API
+#   clawshell-ui        : published ingress relay, restricted to LAN_ALLOW_CIDR
+#   clawshell-control   : internal bridge, gateway-ui <-> Gateway UI/API
 #   clawshell-egress    : internal bridge, Gateway <-> quota-guard, NO other route out
 #   clawshell-sandbox   : internal bridge, Gateway <-> sandbox-dind, NO internet route
 #   clawshell-inference : internal bridge, Gateway <-> local-llm (on-box GPU), NO internet route
 #
-# Only quota-guard has a route to the real internet (its own default network
-# interface). Everything else is boxed in. The local GPU model server
+# Provider egress is through quota-guard. The gateway-ui ingress relay and
+# target-gateway have their own external bridges; agents remain internal-only.
+# The local GPU model server
 # (local-llm) is on a dedicated internal network reachable only by the
 # Gateway and never routed through quota-guard — local inference needs no
 # egress at all (see docs/credentials.md, docs/architecture.md §1).
@@ -17,8 +19,11 @@ name: clawshell
 networks:
   clawshell-control:
     driver: bridge
-    # Published UI ports do not require granting the Gateway outbound routing.
+    # Only internal services attach here; host publishing is on gateway-ui.
     internal: true
+  # UI ingress relay only: agents never join this host-published bridge.
+  clawshell-ui:
+    driver: bridge
   clawshell-egress:
     driver: bridge
     internal: true
@@ -106,6 +111,41 @@ services:
       timeout: 5s
       retries: 3
 
+  # Docker does not publish ports for a container attached only to internal
+  # networks. Keep that isolation and publish via a fixed-destination TCP relay.
+  gateway-ui:
+    image: python:3.12-slim
+    container_name: clawshell-gateway-ui
+    restart: unless-stopped
+    depends_on:
+      openclaw-gateway:
+        condition: service_started
+    networks:
+      - clawshell-ui
+      - clawshell-control
+    ports:
+      # LAN restrictions are enforced by the host firewall as before.
+      - "${OPENCLAW_GATEWAY_PORT:-18789}:18789"
+    entrypoint: ["python3", "/app/gateway_ui.py"]
+    volumes:
+      - ../scripts/gateway_ui.py:/app/gateway_ui.py:ro
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 128m
+    cpus: "0.5"
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket;s=socket.create_connection(('openclaw-gateway',18789),3);s.close()"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
   openclaw-gateway:
     image: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:2026.9.4}
     container_name: clawshell-openclaw-gateway
@@ -123,10 +163,6 @@ services:
       # Reaches the curated pentest-tools MCP server during a black-box live
       # engagement. Carries no traffic unless the blackbox-live profile is up.
       - clawshell-mcp
-    ports:
-      # Bound to the LAN CIDR at the firewall layer (see firewall/nftables.conf);
-      # Compose publishes on all interfaces, nftables restricts who can reach it.
-      - "${OPENCLAW_GATEWAY_PORT:-18789}:18789"
     environment:
       HTTP_PROXY: "http://quota-guard:8080"
       HTTPS_PROXY: "http://quota-guard:8080"

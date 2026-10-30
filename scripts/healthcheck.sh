@@ -19,7 +19,7 @@ container_status() {
 }
 
 section "Containers"
-for c in clawshell-openclaw-gateway clawshell-quota-guard clawshell-sandbox-dind; do
+for c in clawshell-openclaw-gateway clawshell-gateway-ui clawshell-quota-guard clawshell-sandbox-dind; do
   status="$(container_status "${c}")"
   printf '%-32s %s\n' "${c}" "${status}"
   if [[ "${status}" != "running" ]]; then

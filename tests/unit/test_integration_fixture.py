@@ -14,6 +14,7 @@ def production():
     services = {}
     for name, networks in {
         'quota-guard': ['egress', 'uplink'],
+        'gateway-ui': ['control', 'ui'],
         'openclaw-gateway': ['egress', 'control', 'mcp'],
         'openclaw-cli': ['egress', 'control'],
         'sandbox-dind': ['sandbox'],
@@ -27,8 +28,9 @@ def production():
                                       {'type':'bind', 'source':'/real/engagement',
                                        'target':'/home/node/workspace/engagement', 'read_only': True}],
                           'profiles': ['production']}
+    services['gateway-ui']['ports'] = [{'target': 18789, 'published': '18789'}]
     return {'services': services, 'networks': {
-        name: {'driver': 'bridge', 'internal': name not in ('uplink', 'target-uplink'),
+        name: {'driver': 'bridge', 'internal': name not in ('uplink', 'target-uplink', 'ui'),
                'name': 'production-' + name}
         for name in {n for service in services.values() for n in service['networks']}}}
 
@@ -78,6 +80,19 @@ class FixtureTests(unittest.TestCase):
         config['services']['openclaw-gateway']['volumes'].append(
             {'type': 'bind', 'source': '/var/run/docker.sock', 'target': '/socket'})
         with self.assertRaisesRegex(ValueError, 'sensitive host mount'):
+            self.build(config)
+
+    def test_ingress_port_is_published_on_relay_not_gateway(self):
+        config, _, _ = self.build()
+        self.assertFalse(config['services']['openclaw-gateway'].get('ports'))
+        self.assertEqual(config['services']['gateway-ui']['ports'], ['127.0.0.1::18789'])
+        self.assertIn('ui', config['services']['gateway-ui']['networks'])
+        self.assertNotIn('ui', config['services']['openclaw-gateway']['networks'])
+
+    def test_agent_cannot_join_ingress_external_network(self):
+        config = production()
+        config['services']['pentest-tools-mcp']['networks']['ui'] = {}
+        with self.assertRaisesRegex(ValueError, 'unmediated external network'):
             self.build(config)
 
     def test_exposed_proxy_control_ports_rejected(self):

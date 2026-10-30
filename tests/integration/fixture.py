@@ -3,7 +3,7 @@ from copy import deepcopy
 import ipaddress
 from pathlib import Path
 
-SERVICES = ('quota-guard', 'openclaw-gateway', 'target-gateway', 'pentest-tools-mcp')
+SERVICES = ('quota-guard', 'openclaw-gateway', 'gateway-ui', 'target-gateway', 'pentest-tools-mcp')
 
 
 def validate_topology(production):
@@ -28,6 +28,19 @@ def validate_topology(production):
             if ('docker.sock' in source or 'docker.sock' in target or
                     source in ('/', '/run', '/var/run', '/var/lib/docker', '/etc/shadow', '/root/.ssh')):
                 raise ValueError(f'{name} exposes a sensitive host mount: {source}')
+    if production['services']['openclaw-gateway'].get('ports'):
+        raise ValueError('Gateway ports must be published through the ingress relay')
+    ingress = production['services']['gateway-ui']
+    ingress_networks = ingress.get('networks', {})
+    gateway_networks = production['services']['openclaw-gateway']['networks']
+    external = [network for network in ingress_networks
+                if not production['networks'][network].get('internal')]
+    shared = set(ingress_networks) & set(gateway_networks)
+    if len(external) != 1 or not shared or not ingress.get('ports'):
+        raise ValueError('UI relay needs one external ingress bridge, an internal Gateway path and a published port')
+    for name, service in production['services'].items():
+        if name != 'gateway-ui' and set(service.get('networks', {})) & set(external):
+            raise ValueError(f'{name} joins the UI relay external ingress bridge')
     for name in ('quota-guard', 'target-gateway', 'pentest-tools-mcp'):
         if production['services'][name].get('ports'):
             raise ValueError(f'{name} publishes a boundary/control port')
@@ -59,7 +72,7 @@ def build_config(production, source, work, project, subnet='11.203.71.0/24'):
         service.pop('ports', None)
         service.pop('secrets', None)
         service['environment'] = {}
-        if name != 'openclaw-gateway':
+        if name not in ('openclaw-gateway', 'gateway-ui'):
             service['build'] = {'context': str(source / name)}
             service['image'] = f'{project}/{name}:test'
         if 'healthcheck' in service:
@@ -88,7 +101,9 @@ def build_config(production, source, work, project, subnet='11.203.71.0/24'):
     gateway['healthcheck'] = {'test': ['CMD', 'python3', '-c',
         "import urllib.request;urllib.request.urlopen('http://127.0.0.1:18789',timeout=2)"],
         'interval': '2s', 'timeout': '3s', 'retries': 30}
-    gateway['ports'] = ['127.0.0.1::18789']
+    ingress = services['gateway-ui']
+    ingress['ports'] = ['127.0.0.1::18789']
+    ingress['volumes'] = [f'{source}/scripts/gateway_ui.py:/app/gateway_ui.py:ro']
     gateway['volumes'] = [f'{source}/tests/integration/probe.py:/probe.py:ro',
                           f'{work}/engagement:/home/node/workspace/engagement:ro',
                           f'{work}/workspaces:/home/node/workspace/reports']

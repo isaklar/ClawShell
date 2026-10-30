@@ -339,7 +339,7 @@ scripts/setup-team.sh || warn "Agent team workspace seeding failed/skipped — n
 info "Phase 9/14: Build/pull images"
 # ---------------------------------------------------------------------------
 compose build quota-guard
-compose pull openclaw-gateway openclaw-cli || warn "Pull failed/skipped (offline install? use --offline docs later)."
+compose pull openclaw-gateway openclaw-cli gateway-ui || warn "Pull failed/skipped (offline install? use --offline docs later)."
 
 # ---------------------------------------------------------------------------
 info "Phase 10/14: Start services"

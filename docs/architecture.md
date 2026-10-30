@@ -133,8 +133,7 @@ Two trust boundaries matter:
 * Host firewall: **nftables**, default-deny inbound, explicit allow for
   SSH (rate-limited) and the LAN subnet you configure for the Control UI port.
 * Docker networks:
-  * `clawshell-egress` (internal-ish): the only network the OpenClaw Gateway
-    container is attached to besides its sandbox-control network. All
+  * `clawshell-egress` (internal): connects the Gateway to quota-guard. All
     outbound HTTP/HTTPS from the Gateway is forced through `quota-guard`
     (`HTTPS_PROXY`/`HTTP_PROXY` env vars + no direct internet route, the
     network has no default gateway to the internet, only quota-guard has one).
@@ -150,8 +149,10 @@ Two trust boundaries matter:
     nothing else is attached to it. It is **not** proxied through quota-guard, local inference has no external spend to circuit-break and no reason to
     reach the internet, so `local-llm` is listed in the Gateway's `NO_PROXY`.
     Only meaningful when `MODEL_PROVIDER=local-gpu`; see `docs/gpu.md`.
-* `quota-guard` is the only container with a real internet-facing route, and
-  even that route is restricted at the nftables layer to the allowlisted
+* Provider egress uses `quota-guard`; target egress separately uses
+  `target-gateway`. UI ingress is published by the `gateway-ui` fixed-destination
+  relay on `clawshell-ui`, which forwards only to the internal Gateway. The
+  Gateway itself stays on internal networks. Provider egress is restricted at the nftables layer to the allowlisted
   destination IPs/ports resolved for the configured hostnames (see
   `docs/networking.md`). Under the default local-GPU provider the Gateway may
   make **no** external calls at all (no hosted model host, no GitHub if the

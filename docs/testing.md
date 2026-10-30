@@ -54,6 +54,7 @@ are redirected only in those disposable fixture copies.
 | `test_pentest_tools_mcp.py` | The pentest-tools MCP server: gateway-decision parsing (`blocked_by` -> `gateway_decision` / `action_needed`), body truncation, technology fingerprint markers, and the kill switch (the `__main__` guard refuses to start unless `BLACKBOX_LIVE_TESTING=true`). |
 | `test_recovery.py` | Manifest archive roundtrips, ownership/modes, component boundaries, corruption/path/link/special-file rejection, image snapshots and readiness checks. |
 | `test_maintenance.py` | Actual backup/update/restore scripts with isolated Git and simulated Docker: failed pulls/builds/start/readiness, locks, active tasks, interrupted recovery, selected profiles, offline rollback and restore safety-backup recovery. |
+| `test_gateway_ui.py` | UI relay preserves binary/WebSocket bytes and TCP half-closes, cannot select an upstream from CONNECT/Host input, and bounds concurrent sessions. |
 | `test_integration_fixture.py` | Fixture construction preserves production boundaries and rejects external control networks, exposed proxy ports, existing external networks and private simulated-upstream subnets. |
 | `test_integration_probe.py` | Real loopback HTTP responses/counters, propagation of connection failures, and MCP session/SSE client handling used by integration probes. |
 | `test_static_validation_safety.py` | Compose validation leaves existing state/secrets/workspace symlinks and their contents intact. |

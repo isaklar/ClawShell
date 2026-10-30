@@ -25,7 +25,8 @@ The runner renders **production Compose** into a disposable layout, checks its
 network contract, and derives a uniquely named test project from it. Production
 mounts, container/network names, credentials and published ports are replaced.
 Production network memberships and application security settings are retained.
-Only a temporary loopback UI port is published. Existing deployment directories
+Only a temporary loopback UI port is published, on the actual `gateway-ui`
+relay. The Gateway itself has no published ports or external bridge. Existing deployment directories
 and `/opt/clawshell` are never accessed. Containers/volumes and this run's own
 image tags are removed in `finally`, including on ordinary test failures.
 SIGKILL or daemon/host failure can prevent cleanup; remove only resources with
@@ -38,7 +39,8 @@ after installing `pentest-tools-mcp/requirements.txt`.
 
 The actual quota-guard, target-gateway and pentest-tools MCP images are built
 from their production Dockerfiles and run with their real dependencies and
-entrypoints. Before startup, a preflight loads both addons with the actual
+entrypoints. The production fixed-destination UI relay is also run unchanged.
+Before startup, a preflight loads both addons with the actual
 mitmproxy script loader inside their built images. A small Python HTTP server replaces the OpenClaw process so network
 and filesystem assertions do not require a model or credentials. No real
 OpenClaw, nested Docker, GPU or Caveman compatibility is established by this suite.
@@ -58,7 +60,7 @@ intentionally rejected; using them would only test SSRF rejection, not forwardin
 
 | Case | Evidence |
 | --- | --- |
-| `network` | A real allowlisted response succeeds; explicit proxy denial and SSRF denial are checked; provider counters stay unchanged for denied requests. Direct Gateway/MCP connections to upstream fixtures fail, Gateway runtime networks are internal, control APIs are loopback-only, and the UI port remains accessible from the host. |
+| `network` | A real allowlisted response succeeds; explicit proxy denial and SSRF denial are checked; provider counters stay unchanged for denied requests. Direct Gateway/MCP connections to upstream fixtures fail, Gateway runtime networks are internal, control APIs are loopback-only, and the UI relay port remains accessible from the host while the Gateway stays internal-only. |
 | `filesystem` | Engagement data can be read; even root gets EROFS when writing it or the root filesystem. Non-root report writes succeed. Docker inspect verifies capabilities, no-new-privileges, non-privileged mode, and absence of host Docker socket mounts. |
 | `scope` | Allowed GET succeeds, out-of-scope/private/traversal requests fail with the exact policy reason, state-changing methods and verb tunneling need approval, approval only applies to its endpoint, target backoff suppresses forwarding, and forward/deny evidence is persisted. Actual MCP initialization, tool listing and tool calls preserve results and policy denials. |
 | `killswitch` | Actual target-gateway and MCP entrypoints exit with the explicit refusal message when live testing is disabled. |

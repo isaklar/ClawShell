@@ -18,12 +18,14 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 COUNTS[f'{self.command} {self.path}'] += 1
             payload = {'fixture': 'clawshell-integration', 'path': self.path}
-            status = {'/auth': 401, '/quota': 429, '/unstable': 503}.get(self.path, 200)
+            status = {'/auth': 401, '/quota': 429, '/throttle': 429, '/unstable': 503}.get(self.path, 200)
         body = json.dumps(payload).encode()
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(body)))
-        if status in (429, 503):
+        # Terminal quota exhaustion has no trustworthy reset; /throttle models
+        # a retryable rate limit so both circuit modes have distinct fixtures.
+        if self.path == '/throttle' or status == 503:
             self.send_header('Retry-After', '60')
         self.end_headers()
         if self.command != 'HEAD':
