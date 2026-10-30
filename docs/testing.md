@@ -19,7 +19,8 @@ Run an individual file directly for faster iteration, e.g.:
 
 ## What runs where
 
-`run-all.sh` groups the tests into three tiers.
+`run-all.sh` runs static/unit tests by default. Add `--integration` to also run
+the isolated Docker stack; it never probes an existing installation automatically.
 
 ### Static / unit (always run, no deployed host)
 
@@ -51,19 +52,38 @@ are redirected only in those disposable fixture copies.
 | `test_pentest_tools_mcp.py` | The pentest-tools MCP server: gateway-decision parsing (`blocked_by` -> `gateway_decision` / `action_needed`), body truncation, technology fingerprint markers, and the kill switch (the `__main__` guard refuses to start unless `BLACKBOX_LIVE_TESTING=true`). |
 | `test_recovery.py` | Manifest archive roundtrips, ownership/modes, component boundaries, corruption/path/link/special-file rejection, image snapshots and readiness checks. |
 | `test_maintenance.py` | Actual backup/update/restore scripts with isolated Git and simulated Docker: failed pulls/builds/start/readiness, locks, active tasks, interrupted recovery, selected profiles, offline rollback and restore safety-backup recovery. |
+| `test_integration_fixture.py` | Fixture construction preserves production boundaries and rejects external control networks, exposed proxy ports, existing external networks and private simulated-upstream subnets. |
+| `test_integration_probe.py` | Real loopback HTTP responses/counters, propagation of connection failures, and MCP session/SSE client handling used by integration probes. |
+| `test_static_validation_safety.py` | Compose validation leaves existing state/secrets/workspace symlinks and their contents intact. |
 | `_stubs.py` | Shared `mitmproxy` / `mcp` stubs so the suite runs where those packages are absent. |
 
-### Live-host (auto-run only if a deployment is detected)
+### Real Docker integration (separate CI job)
 
-If `run-all.sh` sees a running `clawshell-openclaw-gateway` container it also
-runs the isolation / circuit-breaker tests against it; otherwise they are
-reported as skipped.
+```bash
+bash tests/run-integration.sh
+bash tests/run-all.sh --integration
+```
 
-| Test | What it proves |
-| --- | --- |
-| `test-filesystem-isolation.sh` | The engagement mount is read-only and the agent cannot escape its workspace. |
-| `test-network-isolation.sh` | Egress is deny-by-default; out-of-allowlist hosts are blocked. |
-| `test-quota-guard-circuit-breaker.sh` | The AI-spend circuit breaker opens on simulated quota exhaustion and short-circuits further requests. |
+The `docker-integration` CI job builds and runs actual quota-guard, target-gateway
+and MCP images in a uniquely named disposable project. It verifies successful
+forwarding alongside exact policy denials, circuit opening and upstream request
+counts, approval/scope/backoff enforcement, the actual MCP HTTP transport,
+read-only mounts and report writes, runtime network boundaries, kill switches,
+and archive recovery of actual persistent proxy state followed by process restart.
+Diagnostics are uploaded even when tests fail. Consider making this check required
+in repository branch protection alongside the existing `test` check.
+
+The historical `test-network-isolation.sh`, `test-filesystem-isolation.sh` and
+`test-quota-guard-circuit-breaker.sh` now invoke individual cases of this isolated
+suite. They never alter a live installation. The old blanket "anything except
+HTTP 200 means blocked" checks and unconditional circuit-breaker success have
+been removed.
+
+Docker is required when integration is requested: missing prerequisites fail
+rather than skip. The OpenClaw process is replaced with a small HTTP/probe
+fixture; actual OpenClaw, GPU, nested Docker and full installation/update
+compatibility are **not** asserted. See the [integration guide](../tests/integration/README.md)
+for the fixture subnet, safety boundaries, commands, coverage and remaining gaps.
 
 ### Manual / outline
 

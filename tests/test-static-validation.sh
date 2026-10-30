@@ -132,18 +132,17 @@ if command -v docker >/dev/null 2>&1; then
   for s in gateway_token model_provider_api_key github_agent_token; do
     printf 'placeholder' > "${tmpdir}/secrets/${s}"
   done
-  ln -sfn "${tmpdir}/secrets" secrets
-  ln -sfn "${tmpdir}/state" state
-  ln -sfn "${tmpdir}/workspaces" workspaces
-  ln -sfn "${tmpdir}/logs" logs
-  ln -sfn "${tmpdir}/backups" backups
-  if (cd compose && MODEL_PROVIDER_API_KEY=placeholder docker compose config >/dev/null 2>/tmp/compose-err.$$); then
+  # Render against a disposable project directory. Never replace/delete a
+  # developer's real state/secrets symlinks just to validate Compose.
+  mkdir -p "${tmpdir}/compose"
+  if MODEL_PROVIDER_API_KEY=placeholder docker compose \
+      --project-directory "${tmpdir}/compose" --env-file "${PWD}/.env.example" \
+      -f "${PWD}/compose/compose.yml" config >/dev/null 2>/tmp/compose-err.$$; then
     ok "docker compose config validates"
   else
     bad "docker compose config failed: $(cat /tmp/compose-err.$$)"
   fi
   rm -f /tmp/compose-err.$$
-  rm -f secrets state workspaces logs backups
   trap - EXIT
   rm -rf "${tmpdir}"
 else

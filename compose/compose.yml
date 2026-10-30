@@ -17,6 +17,8 @@ name: clawshell
 networks:
   clawshell-control:
     driver: bridge
+    # Published UI ports do not require granting the Gateway outbound routing.
+    internal: true
   clawshell-egress:
     driver: bridge
     internal: true

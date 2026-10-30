@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
-# Runs every test in tests/. Static/unit tests (no deployed host required)
-# always run. Live-host tests (need a running clawshell deployment) run
-# only if the Gateway container is detected, otherwise they're reported as
-# SKIPPED — this lets you run the full regression suite from a dev laptop
-# and get real signal, without requiring the actual deployment host.
+# Default: static/unit tests only. --integration additionally creates an
+# isolated Docker stack; an existing production Gateway never triggers tests.
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
@@ -15,14 +12,16 @@ STATIC_TESTS=(
   tests/test-blackbox-killswitch.sh
   tests/test-python-unit.sh
 )
-LIVE_TESTS=(
-  tests/test-filesystem-isolation.sh
-  tests/test-network-isolation.sh
-  tests/test-quota-guard-circuit-breaker.sh
-)
 MANUAL_TESTS=(
   tests/test-task-runtime-limit.sh
 )
+
+INTEGRATION=0
+case "${1:-}" in
+  "") ;;
+  --integration) INTEGRATION=1 ;;
+  *) echo "Usage: $0 [--integration]" >&2; exit 2 ;;
+esac
 
 PASS=0
 FAIL=0
@@ -48,19 +47,12 @@ for t in "${STATIC_TESTS[@]}"; do
   run_one "${t}"
 done
 
-if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx 'clawshell-openclaw-gateway'; then
-  echo
-  echo "Detected a running clawshell-openclaw-gateway container — running live-host tests too."
-  for t in "${LIVE_TESTS[@]}"; do
-    run_one "${t}"
-  done
+if [[ "${INTEGRATION}" -eq 1 ]]; then
+  run_one tests/run-integration.sh
 else
   echo
-  echo "No running clawshell-openclaw-gateway container detected — skipping live-host tests:"
-  for t in "${LIVE_TESTS[@]}"; do
-    echo "  SKIP ${t} (requires a deployed/running clawshell host)"
-    SKIP=$((SKIP + 1))
-  done
+  echo "Isolated Docker integration suite not requested (run tests/run-integration.sh)."
+  SKIP=$((SKIP + 1))
 fi
 
 echo
