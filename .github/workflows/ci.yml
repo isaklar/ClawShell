@@ -27,5 +27,8 @@ jobs:
       - name: Install Python test dependencies
         run: python3 -m pip install --upgrade pip httpx
 
+      - name: Install maintenance test dependencies
+        run: sudo apt-get update && sudo apt-get install -y zstd jq
+
       - name: Run regression suite
         run: bash tests/run-all.sh

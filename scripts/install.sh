@@ -60,7 +60,7 @@ apt)
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -y
   apt-get install -y --no-install-recommends \
-    ca-certificates curl gnupg jq nftables unattended-upgrades age openssl
+    ca-certificates curl gnupg jq nftables unattended-upgrades age openssl python3 zstd tar util-linux
 
   if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
     docker_codename="${UBUNTU_CODENAME:-${VERSION_CODENAME:-}}"
@@ -84,11 +84,11 @@ apt)
 pacman)
   # Never refresh only the package database (-Sy): Arch forbids partial upgrades.
   pacman -S --needed --noconfirm \
-    ca-certificates curl gnupg jq nftables age openssl docker docker-compose \
+    ca-certificates curl gnupg jq nftables age openssl docker docker-compose python zstd tar util-linux \
     || die "Arch dependency installation failed. Update the host with 'pacman -Syu', resolve the package error above, then re-run install.sh."
   ;;
 dnf)
-  dnf install -y ca-certificates curl gnupg2 jq nftables age openssl
+  dnf install -y ca-certificates curl gnupg2 jq nftables age openssl python3 zstd tar util-linux
   if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
     install -d -m 0755 /etc/yum.repos.d
     curl -fsSL https://download.docker.com/linux/fedora/docker-ce.repo \
@@ -107,7 +107,7 @@ manual)
   ;;
 esac
 
-for dependency in docker curl jq nft age openssl systemctl; do
+for dependency in docker curl jq nft age openssl systemctl python3 zstd tar flock; do
   command -v "${dependency}" >/dev/null 2>&1 \
     || die "Missing dependency after package installation: ${dependency}. Install it with your distribution's package manager, then re-run install.sh."
 done

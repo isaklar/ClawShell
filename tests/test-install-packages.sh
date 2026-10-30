@@ -118,7 +118,7 @@ expect_failure "Unsupported NVIDIA host missing toolkit stops with instructions"
   "NVIDIA Container Toolkit (nvidia-ctk) is missing" MODEL_PROVIDER=local-gpu \
   MISSING_COMMAND=nvidia-ctk
 
-for dependency in docker curl jq nft age openssl systemctl; do
+for dependency in docker curl jq nft age openssl systemctl python3 zstd tar flock; do
   expect_failure "Missing ${dependency} stops before later phases" \
     "Missing dependency after package installation: ${dependency}" "MISSING_COMMAND=${dependency}"
 done

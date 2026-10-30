@@ -4,10 +4,10 @@
 
 | Task | Command |
 | --- | --- |
-| Update to a newer commit/image | `./scripts/update.sh` (auto rollback on failed healthcheck) |
-| Roll back manually | `./scripts/update.sh --rollback` |
-| Back up state/config | `./scripts/backup.sh` |
-| Restore | `./scripts/restore.sh backups/clawshell-<ts>.tar.zst` |
+| Update to a newer commit/image | `sudo ./scripts/update.sh [--to=<tag-or-commit>]` |
+| Roll back manually | `sudo ./scripts/update.sh --rollback` |
+| Back up state/config | `sudo ./scripts/backup.sh` |
+| Restore | `sudo ./scripts/restore.sh backups/clawshell-<ts>.tar.zst` |
 | Uninstall | `./scripts/uninstall.sh [--purge]` |
 | Add an internal LAN service to the allowlist | `./scripts/allowlist.sh add <host:port>` |
 | Resume after quota exhaustion | `./scripts/quota-guard.sh resume` |
@@ -85,86 +85,163 @@ that would be destructive to existing state requires `--confirm-reset`.
 
 ## Update
 
+Run maintenance scripts as root. They require Docker Compose v2 with JSON config
+output and `pull --ignore-buildable`, Python 3.11+ with `tarfile.data_filter`, jq,
+zstd, tar, and flock (util-linux). Fresh apt installations include these tools;
+on existing/other distributions install missing tools with the host package
+manager. The updater checks prerequisites before stopping services.
+
 ```bash
-./scripts/update.sh
+sudo ./scripts/update.sh --check --to=<tag-or-commit>
+sudo ./scripts/update.sh --to=<tag-or-commit>
+# Without --to, use the current branch's configured upstream after fetching.
+sudo ./scripts/update.sh
 ```
 
-1. `git fetch && git status`, refuses to proceed on a dirty working tree or
-   if you're not on the branch you deployed from (override with `--force`).
-2. `git pull --ff-only` (fast-forward only, a merge conflict here means "go
-   look at this manually," not "improvise").
-3. Diffs `compose/compose.yml` and `.env.example` against your local `.env`
-   for new required keys; stops and tells you exactly what to add if any are
-   missing (never silently defaults a security-relevant new key).
-4. `docker compose pull` (pinned tags, this is a deliberate version bump you
-   control by changing `OPENCLAW_IMAGE`/`QUOTA_GUARD_TAG` in `.env`, not an
-   implicit `latest` float).
-5. `docker compose build quota-guard` (rebuilds only if the Dockerfile/addon
-   changed).
-6. Snapshots current container images (`docker compose images -q`) as the
-   rollback target before recreating anything.
-7. `docker compose up -d` (recreates only changed services).
-8. `scripts/healthcheck.sh --exit-code`, if it fails, `update.sh` **automatically
-   rolls back**: re-tags the previous images as `:current` and
-   `docker compose up -d` again, then exits non-zero so you know an update was
-   attempted and reverted.
-9. Persistent data (`/opt/clawshell/state`, `workspaces`) is never touched
-   by update, only images/containers are replaced. Secrets are never
-   rewritten by `update.sh`.
+`--check` fetches metadata, verifies a fast-forward target and checks for active
+`.env.example` settings missing from `.env`. It does not change the deployed Git
+tree or services, and does not promise that builds or runtime checks will pass.
+Existing image overrides in `.env` remain in effect: inspect them when choosing
+a release. Dependency centralization/locking is separate future work.
 
-> **One-time note for installs predating `AGENT_UID`/`AGENT_GID`:** if you
-> deployed before ownership of `state/quota-guard`/`state/sandbox-dind`/the
-> Gateway containers' UID was reconciled automatically, `update.sh` alone
-> won't fix existing file ownership, it only replaces images/containers,
-> never touches permissions on host directories. Run `sudo ./scripts/install.sh`
-> once after updating (idempotent and safe to re-run) to pick up the correct
-> `AGENT_UID`/`AGENT_GID` and re-chown the quota-guard/sandbox-dind state
-> dirs to their required fixed UIDs.
+The update rejects dirty tracked/untracked files, concurrent maintenance,
+active task attribution, and task records marked RUNNING. It shares a host lock
+with `pentest-task.sh`; new CLI submissions cannot race an update. An interrupted
+update leaves `/opt/clawshell/maintenance-required` plus a private journal and
+requires `--rollback` before another update/task. Do not submit tasks directly
+through the UI/API during any maintenance window; the shell lock does not govern
+those external clients. Backup/restore also take this lock.
 
-### Rollback strategy
+The updater:
 
-* Automatic, as above, on a failed post-update health check.
-* Manual: `./scripts/update.sh --rollback` re-applies the last snapshot
-  recorded in `state/update-history.json` (image digests + git commit at time
-  of last successful update).
-* Git-level rollback: `git checkout <previous-tag-or-commit>` then re-run
-  `./scripts/update.sh`, this repo's own history is your configuration
-  rollback path, which is why `install.sh`/`update.sh` never hand-edit files
-  outside `.env`/`config/allowlist.d/` (both git-ignored, both backed up by
-  `backup.sh`).
+1. Saves the deployed commit, protected `.env`, resolved Compose config, exact
+   running image references, and service activation set under
+   `/opt/clawshell/deployments/<deployment-id>/`. It tags old images locally to
+   retain them across pulls/builds. These snapshots can contain credentials and
+   are root-private; never publish them.
+2. Fast-forwards Git, validates Compose, pulls external images (including the
+   on-demand CLI), and rebuilds all enabled local images with refreshed bases.
+   It selects the configured NVIDIA/AMD and Caveman profiles and preserves a
+   running black-box lane, without arming an inactive lane.
+3. Stops all running ClawShell containers and checks persisted task attribution
+   again to close the task-start race. Takes a full, verified pre-update recovery
+   backup with state writers stopped.
+4. Recreates selected services. Waits up to 600 seconds for running state and
+   configured Docker healthchecks, probes the Gateway HTTP server and nested
+   Docker daemon, and validates quota-guard's status API. Set
+   `UPDATE_HEALTH_TIMEOUT` in `.env` to override the timeout, e.g. for large GPU
+   models. This is readiness checking, not a model inference/security smoke test.
+5. Atomically records success in `deployments/latest.json`. Any error after Git
+   mutation triggers recovery and exits nonzero, even if recovery succeeds.
+
+Updates do not run mutable upstream skill/plugin installers or silently replace
+custom agent workspace files. New skills/templates need explicit review; existing
+Caveman assets remain in persistent state. Host packages, GPU drivers, systemd
+units, firewall changes, and schema migrations are not automatically applied.
+Review release changes before deploying: this updater cannot infer whether an
+upstream migration is reversible. See [Update strategy](update-strategy.md) for
+remaining release/dependency work.
+
+### Rollback
+
+```bash
+sudo ./scripts/update.sh --rollback
+```
+
+Recovery uses the pending interrupted update first, otherwise the last successful
+update's pre-update snapshot. It restores the old Git commit on the current
+branch, site `.env`, backed-up config/state/workspaces, and exact old locally
+retained images. It recreates only previously running services with pulling and
+building disabled, then verifies readiness. No registry access is needed, but the
+saved images and verified archive must still exist.
+
+Manual rollback prompts before replacing data and takes a pre-rollback safety
+backup. **Rollback replaces changes made since the pre-update backup**, including
+new findings and workspace edits. Automatic recovery also restores this snapshot
+when available. Resolve any active task first. If recovery fails, the pending
+journal remains, the command exits nonzero, and investigation is required before
+resuming operation. A failed readiness check may leave containers running for
+diagnostics; the maintenance marker blocks CLI task submission.
+
+Do not prune rollback image tags, deployment directories, or archives referenced
+by a deployment you may need to recover. Snapshots do not include model caches,
+engagement inputs, or host package/driver versions. Models must remain compatible
+with the rollback target. Recovery restores backed-up components and leaves
+unlisted components intact; it does not delete a newly introduced service's data.
+
+Installations predating UID/GID reconciliation still need a reviewed, one-time
+installer reconciliation; the updater does not repair pre-existing ownership.
 
 ## Backup
 
 ```bash
-./scripts/backup.sh
+sudo ./scripts/backup.sh
+sudo ./scripts/backup.sh --metadata-only
+sudo ./scripts/backup.sh --include-secrets
 ```
 
-Archives (tar + zstd) `state/openclaw`, `state/quota-guard`, `config/`
-(excluding secrets), and full `workspaces/` working trees by default (pass
-`--metadata-only` for the lighter git-remote/branch-only capture instead,
-if you've verified where delegated-session clones land and want
-smaller/faster backups) into `backups/clawshell-<timestamp>.tar.zst`,
-plus a checksum file. Secrets are **never** included in this archive; back
-those up separately/manually via your own password manager or
-`age`-encrypted export (`./scripts/backup.sh --include-secrets` produces a
-separate `age`-encrypted file if you explicitly opt in, requiring a
-passphrase prompt).
+Backup requires an idle, running core stack. It briefly stops running ClawShell
+containers for a consistent snapshot and restarts the same container IDs on
+success or handled failure. The daily systemd backup timer uses the same checks;
+if a pentest is running, the backup fails rather than interrupting it. Schedule
+idle windows and monitor timer failures; there is no automatic deferred retry.
 
-Runs automatically once a day via the `clawshell-backup.timer` systemd
-unit (installed and enabled by `install.sh`; see `systemd/clawshell-backup.timer`
-for the schedule). Run `./scripts/backup.sh` manually any time for an
-on-demand backup, e.g. right before `./scripts/update.sh`.
+The version-1 manifest archive contains all existing top-level state components
+except `state/local-llm`, `state/local-llm-amd` model caches and legacy
+`state/update-history.json`. It also contains `config/allowlist.conf`,
+`config/openclaw.json5`, `config/allowlist.d`, full workspaces, and the source Git
+commit. Required core state/config/workspace paths must exist; read/copy failures
+are fatal. `--metadata-only` records workspace repository commit IDs instead of
+workspace contents; restoring it leaves current workspaces untouched.
+
+`.env` and `secrets/` are excluded from the plaintext archive.
+`--include-secrets` separately exports both using passphrase-encrypted age.
+Application state/workspaces may themselves contain sensitive authentication or
+engagement data: **all backup artifacts are private**, not safe for publication.
+Keep encrypted exports and passphrases separately. Restoring `.env`/secrets is a
+separate manual operation; ordinary restore does not overwrite credentials.
+
+Archives are validated before publication, compressed with zstd and accompanied
+by a SHA-256 sidecar. They live under `/opt/clawshell/backups/`, with restrictive
+permissions. Verification detects corruption, not malicious replacement of both
+archive and checksum. Automatic retention/pruning is disabled, including the
+legacy `BACKUP_RETENTION_DAYS` setting, to preserve deployment recovery points.
+Move copies off-host and manage retention explicitly. A full archive must fit on
+disk alongside its uncompressed working/verification copies. Symlinks/hardlinks
+escaping a backed-up component and special files are rejected rather than
+silently omitted; inspect and resolve such layouts before scheduling backups.
 
 ## Restore
 
 ```bash
-./scripts/restore.sh backups/clawshell-<timestamp>.tar.zst
+sudo ./scripts/restore.sh /opt/clawshell/backups/clawshell-<timestamp>.tar.zst
 ```
 
-Stops services, verifies the checksum, extracts into a temp dir, diffs
-against current `state/`/`config/` (prints what would change), asks for
-confirmation, then swaps in. Restarts services and runs `healthcheck.sh`
-automatically at the end.
+Restore verifies the supplied archive against its required checksum, validates
+its manifest and archive paths/links, and shows the exact components to replace
+before confirmation. These steps happen before any running service is stopped.
+Only the version-1 manifest format is accepted; old unmanifested backups require
+manual inspection/migration and are never applied automatically.
+
+After confirmation, restore requires idle tasks, stops the running services and
+takes a verified safety backup. It replaces only paths declared in the selected
+archive, preserving numeric ownership and ordinary file/directory permissions (setuid,
+setgid and sticky bits are stripped during extraction). It does not delete the
+entire `state/` or `config/` tree, touch unlisted caches, or apply a blanket chown.
+It recreates the previously running services using their captured images and
+checks readiness. This restores data, not application code; use a compatible
+ClawShell version or update rollback for coordinated code/image/data recovery.
+
+If writing or readiness fails, the command returns nonzero, the maintenance
+marker stays in place and the private journal under `/opt/clawshell/restores/`
+is retained. Containers can be stopped or unhealthy. Run
+`sudo ./scripts/restore.sh --recover` to apply the pre-restore safety backup and
+recreate the saved service set, without pulling images. Recovery prompts before
+replacing data and works with a stopped stack. A successful restore/recovery
+clears its marker. A hard power loss/SIGKILL before the journal is written can
+leave containers stopped; inspect and restart those containers manually.
+Restore does not resume an interrupted update's journal: recover that update
+with `update.sh --rollback` first.
 
 ## Uninstall
 

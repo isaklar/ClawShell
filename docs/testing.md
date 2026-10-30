@@ -2,7 +2,9 @@
 
 ClawShell ships a self-contained regression suite. Everything that does not
 require a deployed host runs on a plain dev laptop (or CI) with no root, no
-containers, and no network.
+containers, and no external network. The API tests use a loopback HTTP server.
+Install `httpx` in your test Python environment and provide `git`, `jq`, `zstd`,
+and `flock` for the maintenance integration tests (CI installs these tools).
 
 ```bash
 ./tests/run-all.sh
@@ -37,13 +39,18 @@ These are safe anywhere and gate every change:
 Run by `test-python-unit.sh` via `python3 -m unittest discover`. The heavy
 runtime deps (`mitmproxy`, `mcp`) are stubbed, DNS and HTTP are faked, and all
 state is redirected to temp dirs, so these are true units: no Docker, no
-network, no deployed host.
+external network, no deployed host. Loopback sockets must be permitted for the
+control API tests. Maintenance tests run the real shell scripts against temporary
+Git repositories and a simulated Docker executable; all host paths and root checks
+are redirected only in those disposable fixture copies.
 
 | Module | Coverage |
 | --- | --- |
 | `test_target_gateway_addon.py` | The `target-gateway` decision logic and the full `request()`/`response()` lifecycle: deny-by-default scope, encoded-traversal rejection (`%2e%2e`/`%2f`), SSRF / internal-address blocking (loopback, link-local incl. cloud metadata, RFC1918; `localhost` scope refused), effective-method gating (a method-override header cannot smuggle a `DELETE` past a Tier-0 `GET`), full-path approval descriptors (one approval does not cover sibling endpoints), rate limiting, fail-closed state parsing, and denied-flow evidence-log integrity. |
 | `test_control_api.py` | The loopback control API (state helpers + the HTTP handler over an in-process server): engagement start/stop, approve/revoke, status + scope summary, and fail-closed handling of bad JSON / unknown routes. |
 | `test_pentest_tools_mcp.py` | The pentest-tools MCP server: gateway-decision parsing (`blocked_by` -> `gateway_decision` / `action_needed`), body truncation, technology fingerprint markers, and the kill switch (the `__main__` guard refuses to start unless `BLACKBOX_LIVE_TESTING=true`). |
+| `test_recovery.py` | Manifest archive roundtrips, ownership/modes, component boundaries, corruption/path/link/special-file rejection, image snapshots and readiness checks. |
+| `test_maintenance.py` | Actual backup/update/restore scripts with isolated Git and simulated Docker: failed pulls/builds/start/readiness, locks, active tasks, interrupted recovery, selected profiles, offline rollback and restore safety-backup recovery. |
 | `_stubs.py` | Shared `mitmproxy` / `mcp` stubs so the suite runs where those packages are absent. |
 
 ### Live-host (auto-run only if a deployment is detected)
@@ -63,6 +70,16 @@ reported as skipped.
 | Test | Notes |
 | --- | --- |
 | `test-task-runtime-limit.sh` | Documented manual steps to confirm a task is hard-stopped at its runtime cap; not auto-run. |
+
+## Maintenance release validation
+
+Mocked Docker tests cannot establish compatibility with real images or GPU
+hardware. Before shipping an updater release, exercise fresh install → update →
+failed readiness → rollback and backup → restore → restore recovery on a disposable
+host. Verify preserved data/ownership, selected profiles, retained images with the
+registry unavailable, interrupted deployment journals, and task lock behavior.
+Run hosted-provider, AMD/NVIDIA, Caveman and black-box profiles on corresponding
+hosts. Never use the first recovery exercise against irreplaceable engagement data.
 
 ## Adding a test
 
